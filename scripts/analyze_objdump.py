@@ -23,11 +23,8 @@ wanted = (
 counts = {k: 0 for k in wanted}
 sizes = {k: 0 for k in wanted}
 
-# GNU objdump: 00000000 <symbol>:
 angle_label_re = re.compile(r"^\s*[0-9a-fA-F]+\s+<([^>]+)>:\s*$")
-# JieLi objdump: symbol:
 bare_label_re = re.compile(r"^([A-Za-z_.$][\w.$]*):\s*$")
-# Address, encoded bytes/word(s), mnemonic.
 insn_re = re.compile(r"^\s*[0-9a-fA-F]+:\s+(?:[0-9a-fA-F]{2,8}(?:\s+[0-9a-fA-F]{2,8})*)\s+\S+")
 hex_re = re.compile(r"^[0-9a-fA-F]+$")
 
@@ -46,8 +43,10 @@ for line in dis_lines:
     if current and insn_re.match(line):
         counts[current] += 1
 
-# Works with both `nm -S` and JieLi `objdump -t`: symbol is final token,
-# size is the preceding hex token in both formats used by this workflow.
+# Symbol formats differ:
+# GNU nm -S:     ADDRESS SIZE TYPE NAME
+# JieLi objdump: ADDRESS ... SECTION SIZE NAME
+# In both, the last hex token before NAME is the function size.
 for line in sym_lines:
     fields = line.split()
     if len(fields) < 3:
@@ -55,9 +54,9 @@ for line in sym_lines:
     name = canonical(fields[-1])
     if not name:
         continue
-    size_token = fields[-2]
-    if hex_re.match(size_token):
-        sizes[name] = max(sizes[name], int(size_token, 16))
+    hex_fields = [f for f in fields[:-1] if hex_re.match(f)]
+    if len(hex_fields) >= 2:
+        sizes[name] = max(sizes[name], int(hex_fields[-1], 16))
 
 rows = [(platform, name, counts[name], sizes[name]) for name in wanted]
 with open(out_path, "w", newline="") as f:
@@ -70,7 +69,6 @@ for _, name, count, size in rows:
     inline = " (inlined)" if count == 0 and size == 0 else ""
     print(f"{name} instructions={count} code_bytes={size}{inline}")
 
-# note_compute/core_render are expected to be inlined at -Os on both current compilers.
 required = ("fm6_op_run", "fm6_op_fb", "bench_render_voices", "bench_target_entry")
 missing = [name for name in required if counts[name] == 0 or sizes[name] == 0]
 if missing:
