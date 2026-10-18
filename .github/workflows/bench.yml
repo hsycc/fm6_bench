@@ -1,0 +1,117 @@
+name: fm6-bench
+
+on:
+  push:
+    branches: [main, agent/fm6-ci-bench-v1]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FELUCCA_SHA: 5738617968a22b5d4c0d3470cfcc95559052f446
+
+jobs:
+  host-runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Felucca
+        uses: actions/checkout@v4
+        with:
+          repository: hugelton/Felucca
+          ref: ${{ env.FELUCCA_SHA }}
+          path: upstream/Felucca
+          submodules: recursive
+      - name: Generate pinned tables
+        run: |
+          mkdir -p generated build/host
+          python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
+      - name: Build host O2 and Os
+        run: |
+          gcc -std=c11 -O2 -Wall -Wextra \
+            -Igenerated -Iupstream/Felucca/firmware/src -Ibench \
+            bench/host_bench.c -o build/host/fm6_O2
+          gcc -std=c11 -Os -Wall -Wextra \
+            -Igenerated -Iupstream/Felucca/firmware/src -Ibench \
+            bench/host_bench.c -o build/host/fm6_Os
+      - name: Run host benchmark
+        run: |
+          set -o pipefail
+          build/host/fm6_O2 | tee build/host/O2.txt
+          build/host/fm6_Os | tee build/host/Os.txt
+      - name: Verify deterministic CRC across optimization levels
+        run: |
+          sed -n 's/^voices=\([0-9]*\).*crc32=\([0-9a-f]*\).*/\1 \2/p' build/host/O2.txt > build/host/O2.crc
+          sed -n 's/^voices=\([0-9]*\).*crc32=\([0-9a-f]*\).*/\1 \2/p' build/host/Os.txt > build/host/Os.crc
+          diff -u build/host/O2.crc build/host/Os.crc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-runtime-results
+          path: build/host/
+
+  esp32s3-static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Felucca
+        uses: actions/checkout@v4
+        with:
+          repository: hugelton/Felucca
+          ref: ${{ env.FELUCCA_SHA }}
+          path: upstream/Felucca
+          submodules: recursive
+      - name: Generate pinned tables
+        run: |
+          mkdir -p generated build/s3
+          python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
+      - name: Cross-compile for ESP32-S3 and disassemble
+        run: |
+          set -o pipefail
+          docker run --rm -v "$PWD:/work" -w /work espressif/idf:release-v5.5 bash -lc '
+            set -eux
+            xtensa-esp32s3-elf-gcc --version
+            xtensa-esp32s3-elf-gcc -std=c11 -Os -ffunction-sections -fdata-sections -fno-builtin \
+              -Igenerated -Iupstream/Felucca/firmware/src -Ibench \
+              -c bench/target_compile.c -o build/s3/target.o
+            xtensa-esp32s3-elf-objdump -d build/s3/target.o > build/s3/target.dis
+            xtensa-esp32s3-elf-objdump -h build/s3/target.o > build/s3/sections.txt
+            xtensa-esp32s3-elf-nm -S --size-sort build/s3/target.o > build/s3/symbols.txt
+          '
+          python3 scripts/analyze_objdump.py ESP32-S3 build/s3/target.dis build/s3/symbols.txt build/s3/instructions.csv | tee build/s3/summary.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: esp32s3-static-results
+          path: build/s3/
+
+  ac7911b8-static:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Felucca
+        uses: actions/checkout@v4
+        with:
+          repository: hugelton/Felucca
+          ref: ${{ env.FELUCCA_SHA }}
+          path: upstream/Felucca
+          submodules: recursive
+      - name: Generate pinned tables
+        run: |
+          mkdir -p generated build/ac
+          python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
+      - name: Install JieLi pi32v2 toolchain
+        run: bash upstream/Felucca/tools/get_toolchain.sh "$HOME/.jieli"
+      - name: Cross-compile for AC7911B8/pi32v2 and disassemble
+        run: |
+          set -euxo pipefail
+          TC="$HOME/.jieli/toolchain"
+          "$TC/pi32v2/bin/clang" --version
+          "$TC/pi32v2/bin/clang" -target pi32v2 -std=c11 -Os -ffunction-sections -fdata-sections -fno-builtin \
+            -Wno-unused-function -Igenerated -Iupstream/Felucca/firmware/src -Ibench \
+            -c bench/target_compile.c -o build/ac/target.o
+          "$TC/common/bin/objdump" -d build/ac/target.o > build/ac/target.dis
+          "$TC/common/bin/objdump" -h build/ac/target.o > build/ac/sections.txt
+          "$TC/common/bin/objdump" -t build/ac/target.o > build/ac/symbols.txt
+          python3 scripts/analyze_objdump.py AC7911B8-pi32v2 build/ac/target.dis build/ac/symbols.txt build/ac/instructions.csv | tee build/ac/summary.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ac7911b8-static-results
+          path: build/ac/
