@@ -35,6 +35,7 @@ jobs:
             bench/host_bench.c -o build/host/fm6_Os
       - name: Run host benchmark
         run: |
+          set -o pipefail
           build/host/fm6_O2 | tee build/host/O2.txt
           build/host/fm6_Os | tee build/host/Os.txt
       - name: Verify deterministic CRC across optimization levels
@@ -64,6 +65,7 @@ jobs:
           python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
       - name: Cross-compile for ESP32-S3 and disassemble
         run: |
+          set -o pipefail
           docker run --rm -v "$PWD:/work" -w /work espressif/idf:release-v5.5 bash -lc '
             set -eux
             xtensa-esp32s3-elf-gcc --version
@@ -74,7 +76,7 @@ jobs:
             xtensa-esp32s3-elf-objdump -h build/s3/target.o > build/s3/sections.txt
             xtensa-esp32s3-elf-nm -S --size-sort build/s3/target.o > build/s3/symbols.txt
           '
-          python3 scripts/analyze_objdump.py ESP32-S3 build/s3/target.dis build/s3/instructions.csv | tee build/s3/summary.txt
+          python3 scripts/analyze_objdump.py ESP32-S3 build/s3/target.dis build/s3/symbols.txt build/s3/instructions.csv | tee build/s3/summary.txt
       - uses: actions/upload-artifact@v4
         with:
           name: esp32s3-static-results
@@ -99,7 +101,7 @@ jobs:
         run: bash upstream/Felucca/tools/get_toolchain.sh "$HOME/.jieli"
       - name: Cross-compile for AC7911B8/pi32v2 and disassemble
         run: |
-          set -eux
+          set -euxo pipefail
           TC="$HOME/.jieli/toolchain"
           "$TC/pi32v2/bin/clang" --version
           "$TC/pi32v2/bin/clang" -target pi32v2 -std=c11 -Os -ffunction-sections -fdata-sections -fno-builtin \
@@ -108,7 +110,7 @@ jobs:
           "$TC/common/bin/objdump" -d build/ac/target.o > build/ac/target.dis
           "$TC/common/bin/objdump" -h build/ac/target.o > build/ac/sections.txt
           "$TC/common/bin/objdump" -t build/ac/target.o > build/ac/symbols.txt
-          python3 scripts/analyze_objdump.py AC7911B8-pi32v2 build/ac/target.dis build/ac/instructions.csv | tee build/ac/summary.txt
+          python3 scripts/analyze_objdump.py AC7911B8-pi32v2 build/ac/target.dis build/ac/symbols.txt build/ac/instructions.csv | tee build/ac/summary.txt
       - uses: actions/upload-artifact@v4
         with:
           name: ac7911b8-static-results
