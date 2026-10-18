@@ -18,6 +18,12 @@ wanted = (
     "fm6_note_compute",
     "bench_render_voices",
     "bench_target_entry",
+    "bench_op_run_nointerp",
+    "bench_chain3_generic_interp",
+    "bench_chain3_generic_nointerp",
+    "bench_chain3_fused_interp",
+    "bench_chain3_fused_nointerp",
+    "bench_target_opt_entry",
 )
 
 counts = {k: 0 for k in wanted}
@@ -69,7 +75,18 @@ for _, name, count, size in rows:
     inline = " (inlined)" if count == 0 and size == 0 else ""
     print(f"{name} instructions={count} code_bytes={size}{inline}")
 
-required = ("fm6_op_run", "fm6_op_fb", "bench_render_voices", "bench_target_entry")
+required = (
+    "fm6_op_run",
+    "fm6_op_fb",
+    "bench_render_voices",
+    "bench_target_entry",
+    "bench_op_run_nointerp",
+    "bench_chain3_generic_interp",
+    "bench_chain3_generic_nointerp",
+    "bench_chain3_fused_interp",
+    "bench_chain3_fused_nointerp",
+    "bench_target_opt_entry",
+)
 missing = [name for name in required if counts[name] == 0 or sizes[name] == 0]
 if missing:
     raise SystemExit("failed to identify required target functions: " + ", ".join(missing))
