@@ -10,31 +10,35 @@ if len(sys.argv) != 4:
 platform, dis_path, out_path = sys.argv[1:]
 text = Path(dis_path).read_text(errors="replace").splitlines()
 
-wanted = {
+wanted = (
     "fm6_op_run",
     "fm6_op_fb",
     "fm6_core_render",
     "fm6_note_compute",
     "bench_render_voices",
     "bench_target_entry",
-}
+)
 
-sym = None
+current = None
 counts = {k: 0 for k in wanted}
-# GNU objdump labels look like: 00000000 <fm6_op_run>:
 label_re = re.compile(r"^\s*[0-9a-fA-F]+\s+<([^>]+)>:\s*$")
-# Require address + at least one encoded byte/word field + mnemonic text.
 insn_re = re.compile(r"^\s*[0-9a-fA-F]+:\s+([0-9a-fA-F]{2,8}(?:\s+[0-9a-fA-F]{2,8})*)\s+\S+")
+
+def canonical(symbol: str):
+    for name in wanted:
+        if symbol == name or symbol.startswith(name + "."):
+            return name
+    return None
 
 for line in text:
     m = label_re.match(line)
     if m:
-        sym = m.group(1)
+        current = canonical(m.group(1))
         continue
-    if sym in wanted and insn_re.match(line):
-        counts[sym] += 1
+    if current and insn_re.match(line):
+        counts[current] += 1
 
-rows = [(platform, name, counts[name]) for name in sorted(wanted)]
+rows = [(platform, name, counts[name]) for name in wanted]
 with open(out_path, "w", newline="") as f:
     w = csv.writer(f)
     w.writerow(["platform", "function", "instructions"])
@@ -44,5 +48,7 @@ print(f"TARGET-ASM platform={platform}")
 for _, name, count in rows:
     print(f"{name} instructions={count}")
 
-if counts["fm6_op_run"] == 0 or counts["fm6_note_compute"] == 0:
-    raise SystemExit("failed to identify required function disassembly")
+required = ("fm6_op_run", "fm6_op_fb", "fm6_note_compute", "bench_render_voices")
+missing = [name for name in required if counts[name] == 0]
+if missing:
+    raise SystemExit("failed to identify required function disassembly: " + ", ".join(missing))
