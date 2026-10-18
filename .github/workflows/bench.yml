@@ -2,7 +2,7 @@ name: fm6-bench
 
 on:
   push:
-    branches: [main, agent/fm6-ci-bench-v1]
+    branches: [main, agent/fm6-bench-v2-opt-kernels]
   pull_request:
   workflow_dispatch:
 
@@ -21,28 +21,57 @@ jobs:
           ref: ${{ env.FELUCCA_SHA }}
           path: upstream/Felucca
           submodules: recursive
-      - name: Generate pinned tables
+      - name: Generate pinned tables and no-interp core
         run: |
           mkdir -p generated build/host
           python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
+          python3 scripts/make_nointerp_core.py upstream/Felucca/firmware/src/fm6_core.c generated/fm6_core_nointerp.c
       - name: Build host O2 and Os
         run: |
-          gcc -std=c11 -O2 -Wall -Wextra \
-            -Igenerated -Iupstream/Felucca/firmware/src -Ibench \
-            bench/host_bench.c -o build/host/fm6_O2
-          gcc -std=c11 -Os -Wall -Wextra \
-            -Igenerated -Iupstream/Felucca/firmware/src -Ibench \
-            bench/host_bench.c -o build/host/fm6_Os
+          COMMON='-std=c11 -Wall -Wextra -Igenerated -Iupstream/Felucca/firmware/src -Ibench'
+          gcc $COMMON -O2 bench/host_bench.c -o build/host/fm6_O2
+          gcc $COMMON -Os bench/host_bench.c -o build/host/fm6_Os
+          gcc $COMMON -O2 -DBENCH_FM6_CORE_INCLUDE='"fm6_core_nointerp.c"' \
+            bench/host_bench.c -o build/host/fm6_nointerp_O2
+          gcc $COMMON -Os -DBENCH_FM6_CORE_INCLUDE='"fm6_core_nointerp.c"' \
+            bench/host_bench.c -o build/host/fm6_nointerp_Os
+          gcc $COMMON -O2 bench/kernel_bench.c -lm -o build/host/kernel_O2
+          gcc $COMMON -Os bench/kernel_bench.c -lm -o build/host/kernel_Os
+          gcc $COMMON -O2 bench/full_engine_dump.c -o build/host/dump_interp
+          gcc $COMMON -O2 -DBENCH_FM6_CORE_INCLUDE='"fm6_core_nointerp.c"' \
+            bench/full_engine_dump.c -o build/host/dump_nointerp
       - name: Run host benchmark
         run: |
           set -o pipefail
           build/host/fm6_O2 | tee build/host/O2.txt
           build/host/fm6_Os | tee build/host/Os.txt
-      - name: Verify deterministic CRC across optimization levels
+          build/host/fm6_nointerp_O2 | tee build/host/nointerp_O2.txt
+          build/host/fm6_nointerp_Os | tee build/host/nointerp_Os.txt
+          build/host/kernel_O2 | tee build/host/kernel_O2.txt
+          build/host/kernel_Os | tee build/host/kernel_Os.txt
+          build/host/dump_interp > build/host/full_interp.pcm
+          build/host/dump_nointerp > build/host/full_nointerp.pcm
+          python3 scripts/compare_full_engine.py \
+            build/host/O2.txt build/host/nointerp_O2.txt \
+            build/host/full_interp.pcm build/host/full_nointerp.pcm | tee build/host/full_engine_compare.txt
+      - name: Verify deterministic output and fused equivalence
         run: |
           sed -n 's/^voices=\([0-9]*\).*crc32=\([0-9a-f]*\).*/\1 \2/p' build/host/O2.txt > build/host/O2.crc
           sed -n 's/^voices=\([0-9]*\).*crc32=\([0-9a-f]*\).*/\1 \2/p' build/host/Os.txt > build/host/Os.crc
           diff -u build/host/O2.crc build/host/Os.crc
+
+          sed -n 's/^voices=\([0-9]*\).*crc32=\([0-9a-f]*\).*/\1 \2/p' build/host/nointerp_O2.txt > build/host/nointerp_O2.crc
+          sed -n 's/^voices=\([0-9]*\).*crc32=\([0-9a-f]*\).*/\1 \2/p' build/host/nointerp_Os.txt > build/host/nointerp_Os.crc
+          diff -u build/host/nointerp_O2.crc build/host/nointerp_Os.crc
+
+          grep -q '^equiv mode=chain3_interp result=PASS$' build/host/kernel_O2.txt
+          grep -q '^equiv mode=chain3_nointerp result=PASS$' build/host/kernel_O2.txt
+          grep -q '^equiv mode=chain3_interp result=PASS$' build/host/kernel_Os.txt
+          grep -q '^equiv mode=chain3_nointerp result=PASS$' build/host/kernel_Os.txt
+
+          sed -n 's/^kernel mode=\([^ ]*\).*crc32=\([0-9a-f]*\).*/\1 \2/p' build/host/kernel_O2.txt > build/host/kernel_O2.crc
+          sed -n 's/^kernel mode=\([^ ]*\).*crc32=\([0-9a-f]*\).*/\1 \2/p' build/host/kernel_Os.txt > build/host/kernel_Os.crc
+          diff -u build/host/kernel_O2.crc build/host/kernel_Os.crc
       - uses: actions/upload-artifact@v4
         with:
           name: host-runtime-results
@@ -59,24 +88,41 @@ jobs:
           ref: ${{ env.FELUCCA_SHA }}
           path: upstream/Felucca
           submodules: recursive
-      - name: Generate pinned tables
+      - name: Generate pinned tables and no-interp core
         run: |
-          mkdir -p generated build/s3
+          mkdir -p generated build/s3/Os build/s3/O2
           python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
+          python3 scripts/make_nointerp_core.py upstream/Felucca/firmware/src/fm6_core.c generated/fm6_core_nointerp.c
       - name: Cross-compile for ESP32-S3 and disassemble
         run: |
           set -o pipefail
           docker run --rm -v "$PWD:/work" -w /work espressif/idf:release-v5.5 bash -lc '
             set -eux
             xtensa-esp32s3-elf-gcc --version
-            xtensa-esp32s3-elf-gcc -std=c11 -Os -ffunction-sections -fdata-sections -fno-builtin \
-              -Igenerated -Iupstream/Felucca/firmware/src -Ibench \
-              -c bench/target_compile.c -o build/s3/target.o
-            xtensa-esp32s3-elf-objdump -d build/s3/target.o > build/s3/target.dis
-            xtensa-esp32s3-elf-objdump -h build/s3/target.o > build/s3/sections.txt
-            xtensa-esp32s3-elf-nm -S --size-sort build/s3/target.o > build/s3/symbols.txt
+            for opt in Os O2; do
+              flag="-$opt"
+              common="$flag -std=c11 -ffunction-sections -fdata-sections -fno-builtin -Igenerated -Iupstream/Felucca/firmware/src -Ibench"
+              xtensa-esp32s3-elf-gcc $common -c bench/target_compile.c -o "build/s3/$opt/target.o"
+              xtensa-esp32s3-elf-objdump -d "build/s3/$opt/target.o" > "build/s3/$opt/target.dis"
+              xtensa-esp32s3-elf-objdump -h "build/s3/$opt/target.o" > "build/s3/$opt/sections.txt"
+              xtensa-esp32s3-elf-nm -S --size-sort "build/s3/$opt/target.o" > "build/s3/$opt/symbols.txt"
+
+              xtensa-esp32s3-elf-gcc $common -DBENCH_FM6_CORE_INCLUDE=\"fm6_core_nointerp.c\" \
+                -c bench/target_compile.c -o "build/s3/$opt/target_full_nointerp.o"
+              xtensa-esp32s3-elf-objdump -d "build/s3/$opt/target_full_nointerp.o" > "build/s3/$opt/target_full_nointerp.dis"
+              xtensa-esp32s3-elf-nm -S --size-sort "build/s3/$opt/target_full_nointerp.o" > "build/s3/$opt/symbols_full_nointerp.txt"
+            done
           '
-          python3 scripts/analyze_objdump.py ESP32-S3 build/s3/target.dis build/s3/symbols.txt build/s3/instructions.csv | tee build/s3/summary.txt
+          for opt in Os O2; do
+            python3 scripts/analyze_objdump.py "ESP32-S3-$opt" \
+              "build/s3/$opt/target.dis" "build/s3/$opt/symbols.txt" \
+              "build/s3/$opt/instructions.csv" | tee "build/s3/$opt/summary.txt"
+            python3 scripts/analyze_hot_loops.py "ESP32-S3-$opt" \
+              "build/s3/$opt/target.dis" "build/s3/$opt/hot_loops.csv" | tee "build/s3/$opt/hot_loops.txt"
+            python3 scripts/analyze_objdump.py "ESP32-S3-$opt-full-nointerp" \
+              "build/s3/$opt/target_full_nointerp.dis" "build/s3/$opt/symbols_full_nointerp.txt" \
+              "build/s3/$opt/instructions_full_nointerp.csv" | tee "build/s3/$opt/summary_full_nointerp.txt"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: esp32s3-static-results
@@ -93,10 +139,11 @@ jobs:
           ref: ${{ env.FELUCCA_SHA }}
           path: upstream/Felucca
           submodules: recursive
-      - name: Generate pinned tables
+      - name: Generate pinned tables and no-interp core
         run: |
-          mkdir -p generated build/ac
+          mkdir -p generated build/ac/Os build/ac/O2
           python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
+          python3 scripts/make_nointerp_core.py upstream/Felucca/firmware/src/fm6_core.c generated/fm6_core_nointerp.c
       - name: Install JieLi pi32v2 toolchain
         run: bash upstream/Felucca/tools/get_toolchain.sh "$HOME/.jieli"
       - name: Cross-compile for AC7911B8/pi32v2 and disassemble
@@ -104,13 +151,27 @@ jobs:
           set -euxo pipefail
           TC="$HOME/.jieli/toolchain"
           "$TC/pi32v2/bin/clang" --version
-          "$TC/pi32v2/bin/clang" -target pi32v2 -std=c11 -Os -ffunction-sections -fdata-sections -fno-builtin \
-            -Wno-unused-function -Igenerated -Iupstream/Felucca/firmware/src -Ibench \
-            -c bench/target_compile.c -o build/ac/target.o
-          "$TC/common/bin/objdump" -d build/ac/target.o > build/ac/target.dis
-          "$TC/common/bin/objdump" -h build/ac/target.o > build/ac/sections.txt
-          "$TC/common/bin/objdump" -t build/ac/target.o > build/ac/symbols.txt
-          python3 scripts/analyze_objdump.py AC7911B8-pi32v2 build/ac/target.dis build/ac/symbols.txt build/ac/instructions.csv | tee build/ac/summary.txt
+          for opt in Os O2; do
+            flag="-$opt"
+            common="-target pi32v2 -std=c11 $flag -ffunction-sections -fdata-sections -fno-builtin -Wno-unused-function -Igenerated -Iupstream/Felucca/firmware/src -Ibench"
+            "$TC/pi32v2/bin/clang" $common -c bench/target_compile.c -o "build/ac/$opt/target.o"
+            "$TC/common/bin/objdump" -d "build/ac/$opt/target.o" > "build/ac/$opt/target.dis"
+            "$TC/common/bin/objdump" -h "build/ac/$opt/target.o" > "build/ac/$opt/sections.txt"
+            "$TC/common/bin/objdump" -t "build/ac/$opt/target.o" > "build/ac/$opt/symbols.txt"
+            python3 scripts/analyze_objdump.py "AC7911B8-pi32v2-$opt" \
+              "build/ac/$opt/target.dis" "build/ac/$opt/symbols.txt" \
+              "build/ac/$opt/instructions.csv" | tee "build/ac/$opt/summary.txt"
+            python3 scripts/analyze_hot_loops.py "AC7911B8-pi32v2-$opt" \
+              "build/ac/$opt/target.dis" "build/ac/$opt/hot_loops.csv" | tee "build/ac/$opt/hot_loops.txt"
+
+            "$TC/pi32v2/bin/clang" $common -DBENCH_FM6_CORE_INCLUDE=\"fm6_core_nointerp.c\" \
+              -c bench/target_compile.c -o "build/ac/$opt/target_full_nointerp.o"
+            "$TC/common/bin/objdump" -d "build/ac/$opt/target_full_nointerp.o" > "build/ac/$opt/target_full_nointerp.dis"
+            "$TC/common/bin/objdump" -t "build/ac/$opt/target_full_nointerp.o" > "build/ac/$opt/symbols_full_nointerp.txt"
+            python3 scripts/analyze_objdump.py "AC7911B8-pi32v2-$opt-full-nointerp" \
+              "build/ac/$opt/target_full_nointerp.dis" "build/ac/$opt/symbols_full_nointerp.txt" \
+              "build/ac/$opt/instructions_full_nointerp.csv" | tee "build/ac/$opt/summary_full_nointerp.txt"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: ac7911b8-static-results

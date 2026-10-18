@@ -7,7 +7,10 @@
 #define FELUCCA_CPU2 0
 #endif
 
-#include "fm6_core.c"
+#ifndef BENCH_FM6_CORE_INCLUDE
+#define BENCH_FM6_CORE_INCLUDE "fm6_core.c"
+#endif
+#include BENCH_FM6_CORE_INCLUDE
 
 #define BENCH_MAX_VOICES 24u
 

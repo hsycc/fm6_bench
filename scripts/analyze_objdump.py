@@ -18,6 +18,12 @@ wanted = (
     "fm6_note_compute",
     "bench_render_voices",
     "bench_target_entry",
+    "bench_op_run_nointerp",
+    "bench_chain3_generic_interp",
+    "bench_chain3_generic_nointerp",
+    "bench_chain3_fused_interp",
+    "bench_chain3_fused_nointerp",
+    "bench_target_opt_entry",
 )
 
 counts = {k: 0 for k in wanted}
@@ -66,10 +72,31 @@ with open(out_path, "w", newline="") as f:
 
 print(f"TARGET-ASM platform={platform}")
 for _, name, count, size in rows:
-    inline = " (inlined)" if count == 0 and size == 0 else ""
-    print(f"{name} instructions={count} code_bytes={size}{inline}")
+    if count == 0 and size == 0:
+        note = " (inlined/removed)"
+    elif count == 0 and size > 0:
+        # GCC/Clang may emit two symbols at one address and objdump prints only
+        # one label. The symbol table still proves the other function exists.
+        note = " (aliased/label-folded)"
+    else:
+        note = ""
+    print(f"{name} instructions={count} code_bytes={size}{note}")
 
-required = ("fm6_op_run", "fm6_op_fb", "bench_render_voices", "bench_target_entry")
-missing = [name for name in required if counts[name] == 0 or sizes[name] == 0]
+required = (
+    "fm6_op_run",
+    "fm6_op_fb",
+    "bench_render_voices",
+    "bench_target_entry",
+    "bench_op_run_nointerp",
+    "bench_chain3_generic_interp",
+    "bench_chain3_generic_nointerp",
+    "bench_chain3_fused_interp",
+    "bench_chain3_fused_nointerp",
+    "bench_target_opt_entry",
+)
+# A non-zero symbol size with no separate disassembly label is valid: modern
+# compilers can merge identical functions and leave multiple symbols pointing
+# at one body. Fail only when both disassembly and symbol table lost a function.
+missing = [name for name in required if counts[name] == 0 and sizes[name] == 0]
 if missing:
     raise SystemExit("failed to identify required target functions: " + ", ".join(missing))
