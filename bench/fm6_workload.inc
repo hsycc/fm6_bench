@@ -1,6 +1,5 @@
 /* Shared FM6 workload. Included by host and target translation units. */
 #include <stdint.h>
-#include <string.h>
 
 #include "felucca_tables.h"
 
@@ -16,9 +15,21 @@ static fm6_note_t bench_voices[BENCH_MAX_VOICES];
 static int32_t bench_out[BENCH_MAX_VOICES][CTL];
 static uint8_t bench_patch[FP_SIZE + 1u];
 
+static void bench_zero_u8(uint8_t *p, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; ++i)
+        p[i] = 0;
+}
+
+static void bench_zero_i32(int32_t *p, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; ++i)
+        p[i] = 0;
+}
+
 static void bench_make_heavy_patch(void)
 {
-    memset(bench_patch, 0, sizeof bench_patch);
+    bench_zero_u8(bench_patch, (uint32_t)sizeof bench_patch);
 
     for (uint32_t k = 0; k < 6u; ++k) {
         uint8_t *o = bench_patch + k * FP_OP;
@@ -60,8 +71,8 @@ static void bench_make_heavy_patch(void)
 
 static void bench_init_voices(uint32_t nvoice)
 {
-    memset(bench_voices, 0, sizeof bench_voices);
-    memset(bench_out, 0, sizeof bench_out);
+    bench_zero_u8((uint8_t *)bench_voices, (uint32_t)sizeof bench_voices);
+    bench_zero_i32((int32_t *)bench_out, (uint32_t)(sizeof bench_out / sizeof bench_out[0][0]));
     bench_make_heavy_patch();
 
     for (uint32_t v = 0; v < nvoice; ++v) {
