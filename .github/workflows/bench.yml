@@ -117,6 +117,8 @@ jobs:
             python3 scripts/analyze_objdump.py "ESP32-S3-$opt" \
               "build/s3/$opt/target.dis" "build/s3/$opt/symbols.txt" \
               "build/s3/$opt/instructions.csv" | tee "build/s3/$opt/summary.txt"
+            python3 scripts/analyze_hot_loops.py "ESP32-S3-$opt" \
+              "build/s3/$opt/target.dis" "build/s3/$opt/hot_loops.csv" | tee "build/s3/$opt/hot_loops.txt"
             python3 scripts/analyze_objdump.py "ESP32-S3-$opt-full-nointerp" \
               "build/s3/$opt/target_full_nointerp.dis" "build/s3/$opt/symbols_full_nointerp.txt" \
               "build/s3/$opt/instructions_full_nointerp.csv" | tee "build/s3/$opt/summary_full_nointerp.txt"
@@ -159,6 +161,8 @@ jobs:
             python3 scripts/analyze_objdump.py "AC7911B8-pi32v2-$opt" \
               "build/ac/$opt/target.dis" "build/ac/$opt/symbols.txt" \
               "build/ac/$opt/instructions.csv" | tee "build/ac/$opt/summary.txt"
+            python3 scripts/analyze_hot_loops.py "AC7911B8-pi32v2-$opt" \
+              "build/ac/$opt/target.dis" "build/ac/$opt/hot_loops.csv" | tee "build/ac/$opt/hot_loops.txt"
 
             "$TC/pi32v2/bin/clang" $common -DBENCH_FM6_CORE_INCLUDE=\"fm6_core_nointerp.c\" \
               -c bench/target_compile.c -o "build/ac/$opt/target_full_nointerp.o"
