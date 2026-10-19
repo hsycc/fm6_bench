@@ -1,8 +1,8 @@
-/* V4A shared audio-block workload.
+/* V4A shared full-audio workload.
  *
- * Extends the V3 FM6 stress workload with a deterministic mono mix and stereo
- * 32-bit pack.  The FM synthesis source/patch remains identical to V3; V4A
- * adds only the work a real audio transport needs after the voices render.
+ * Felucca/FM-1 services ALNK0 in 128-frame halves and renders that half as
+ * four CTL=32 FM blocks. V4A uses the same 128-frame transport quantum on
+ * every target so DMA scheduling is compared at the same buffering cadence.
  */
 #ifndef FM6_BENCH_V4A_AUDIO_WORKLOAD_INC
 #define FM6_BENCH_V4A_AUDIO_WORKLOAD_INC
@@ -13,14 +13,23 @@
 #ifndef V4A_SAMPLE_RATE
 #define V4A_SAMPLE_RATE 44100u
 #endif
-#ifndef V4A_MEASURE_BLOCKS
-#define V4A_MEASURE_BLOCKS 1024u
+#ifndef V4A_QUANTUM_FRAMES
+#define V4A_QUANTUM_FRAMES 128u
 #endif
-#ifndef V4A_WARM_BLOCKS
-#define V4A_WARM_BLOCKS 128u
+#ifndef V4A_MEASURE_QUANTA
+#define V4A_MEASURE_QUANTA 256u
+#endif
+#ifndef V4A_WARM_QUANTA
+#define V4A_WARM_QUANTA 32u
 #endif
 
-static int32_t v4a_stereo[CTL * 2u];
+#if (V4A_QUANTUM_FRAMES % CTL) != 0
+#error "V4A transport quantum must contain a whole number of CTL blocks"
+#endif
+#define V4A_BLOCKS_PER_QUANTUM (V4A_QUANTUM_FRAMES / CTL)
+
+static int32_t v4a_stereo_block[CTL * 2u];
+static int32_t v4a_stereo_quantum[V4A_QUANTUM_FRAMES * 2u];
 
 static int32_t v4a_sat_i32(int64_t x)
 {
@@ -31,10 +40,10 @@ static int32_t v4a_sat_i32(int64_t x)
     return (int32_t)x;
 }
 
-/* Render complete FM6 voices, sum them, normalize only to prevent arithmetic
- * clipping in the benchmark transport, and duplicate to L/R.  The division is
- * intentionally part of V4A's post-FM audio cost on every target. */
-__attribute__((noinline)) static uint32_t v4a_render_stereo(uint32_t nvoice)
+/* Render one CTL block, mix complete FM6 voices to mono, normalize only to
+ * prevent benchmark arithmetic clipping, and duplicate to L/R. The mix/pack
+ * work is intentionally part of the V4A DSP cost on every target. */
+__attribute__((noinline)) static uint32_t v4a_render_stereo_block(uint32_t nvoice)
 {
     uint32_t sounded = bench_render_voices(nvoice);
     for (uint32_t i = 0; i < CTL; ++i) {
@@ -44,8 +53,20 @@ __attribute__((noinline)) static uint32_t v4a_render_stereo(uint32_t nvoice)
         if (nvoice)
             s /= (int32_t)nvoice;
         int32_t q = v4a_sat_i32(s);
-        v4a_stereo[2u * i] = q;
-        v4a_stereo[2u * i + 1u] = q;
+        v4a_stereo_block[2u * i] = q;
+        v4a_stereo_block[2u * i + 1u] = q;
+    }
+    return sounded;
+}
+
+/* One real transport service quantum: four 32-sample FM blocks on FM-1. */
+__attribute__((noinline)) static uint32_t v4a_render_quantum(uint32_t nvoice)
+{
+    uint32_t sounded = 0;
+    for (uint32_t b = 0; b < V4A_BLOCKS_PER_QUANTUM; ++b) {
+        sounded += v4a_render_stereo_block(nvoice);
+        for (uint32_t i = 0; i < CTL * 2u; ++i)
+            v4a_stereo_quantum[b * CTL * 2u + i] = v4a_stereo_block[i];
     }
     return sounded;
 }
