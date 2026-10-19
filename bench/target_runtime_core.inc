@@ -8,12 +8,13 @@
  *   BENCH_RT_CPU_HZ         CPU frequency for equivalent-cycle reporting; 0 if unknown
  *   BENCH_RT_SAMPLE_RATE    synthesis sample rate (default 44100)
  *   BENCH_RT_ENTER/EXIT     isolate one measured block (default no-op)
+ *   BENCH_RT_AFTER_BLOCK    service hook outside timing (default no-op)
  *
  * A measurement is one FM6 control block (CTL = 32 samples) for N complete
  * six-operator voices. Clock read overhead is calibrated and subtracted.
  * Percentiles are over BENCH_RT_SAMPLES independent block timings.
  * Only bench_render_voices() is inside the measured interval; result/sink
- * bookkeeping happens after the end clock read.
+ * bookkeeping and BENCH_RT_AFTER_BLOCK happen after the end clock read.
  */
 #ifndef BENCH_TARGET_RUNTIME_CORE_INC
 #define BENCH_TARGET_RUNTIME_CORE_INC
@@ -41,6 +42,9 @@
 #endif
 #ifndef BENCH_RT_EXIT
 #define BENCH_RT_EXIT() do { } while (0)
+#endif
+#ifndef BENCH_RT_AFTER_BLOCK
+#define BENCH_RT_AFTER_BLOCK() do { } while (0)
 #endif
 #ifndef BENCH_RT_SAMPLES
 #define BENCH_RT_SAMPLES 1024u
@@ -123,6 +127,7 @@ static void bench_rt_measure(uint32_t voices, bench_rt_result_t *r)
     for (uint32_t i = 0; i < BENCH_RT_WARM_BLOCKS; ++i) {
         uint32_t sounded = bench_render_voices(voices);
         bench_rt_sink = bench_rt_mix_sink(bench_rt_sink, sounded, i);
+        BENCH_RT_AFTER_BLOCK();
     }
 
     for (uint32_t i = 0; i < BENCH_RT_SAMPLES; ++i) {
@@ -134,6 +139,7 @@ static void bench_rt_measure(uint32_t voices, bench_rt_result_t *r)
         BENCH_RT_EXIT();
         bench_rt_sink = bench_rt_mix_sink(bench_rt_sink, sounded,
                                            BENCH_RT_WARM_BLOCKS + i);
+        BENCH_RT_AFTER_BLOCK();
         d = b - a;
         d = d > overhead ? d - overhead : 0u;
         bench_rt_samples[i] = d;
