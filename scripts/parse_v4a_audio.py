@@ -52,13 +52,13 @@ def main() -> int:
     for voices in EXPECTED:
         r = rows[voices]
         required = (
-            "deadline_cycles", "dsp_p99", "dsp_miss", "starve", "write_fail",
+            "deadline_ticks", "dsp_p99", "dsp_miss", "starve", "write_fail",
             "send_q_ovf", "write_p99", "total_p99"
         )
         absent = [k for k in required if k not in r]
         if absent:
             raise SystemExit(f"voices={voices}: missing fields {absent}")
-        deadline = r["deadline_cycles"]
+        deadline = r["deadline_ticks"]
         util = (100.0 * r["dsp_p99"] / deadline) if deadline else 0.0
         safe = (
             util <= args.safe_percent
