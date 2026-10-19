@@ -7,10 +7,15 @@
 #define FELUCCA_CPU2 0
 #endif
 
+/* A standalone benchmark TU pulls in Felucca's FM6 core here. A Felucca unity
+ * build already included engines.c -> fm6_core.c, so its overlay defines
+ * BENCH_FM6_CORE_ALREADY_INCLUDED to reuse those exact static definitions. */
+#ifndef BENCH_FM6_CORE_ALREADY_INCLUDED
 #ifndef BENCH_FM6_CORE_INCLUDE
 #define BENCH_FM6_CORE_INCLUDE "fm6_core.c"
 #endif
 #include BENCH_FM6_CORE_INCLUDE
+#endif
 
 #define BENCH_MAX_VOICES 24u
 
