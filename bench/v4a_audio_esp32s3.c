@@ -13,11 +13,14 @@
 #include "esp_cpu.h"
 #include "esp_err.h"
 #include "driver/i2s_std.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #define V4A_CPU_HZ ((uint32_t)CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ * 1000000u)
 #define V4A_DMA_DESC 4u
 #define V4A_WRITE_TIMEOUT_MS 1000u
 #define V4A_STAT_N V4A_MEASURE_BLOCKS
+#define V4A_ARM_DELAY_MS 5000u
 
 #include "v4a_audio_workload.inc"
 
@@ -230,6 +233,10 @@ static void v4a_run_case(uint32_t voices)
 
 void app_main(void)
 {
+    printf("FM6-V4A ARM delay_ms=%u\n", (unsigned)V4A_ARM_DELAY_MS);
+    fflush(stdout);
+    vTaskDelay(pdMS_TO_TICKS(V4A_ARM_DELAY_MS));
+
     printf("FM6-V4A platform=ESP32-S3-I2S cpu_hz=%u sr=%u block=%u dma_desc=%u dma_frame=%u "
            "bclk_gpio=%d ws_gpio=%d dout_gpio=%d\n",
            (unsigned)V4A_CPU_HZ, (unsigned)V4A_SAMPLE_RATE, (unsigned)CTL,
