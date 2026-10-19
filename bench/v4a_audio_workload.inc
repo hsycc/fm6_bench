@@ -8,7 +8,9 @@
 #define FM6_BENCH_V4A_AUDIO_WORKLOAD_INC
 
 #include <stdint.h>
+#ifndef V4A_FM6_WORKLOAD_ALREADY_INCLUDED
 #include "fm6_workload.inc"
+#endif
 
 #ifndef V4A_SAMPLE_RATE
 #define V4A_SAMPLE_RATE 44100u
