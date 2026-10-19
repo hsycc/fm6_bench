@@ -1,8 +1,7 @@
 /* ESP32-S3 V4A: FM6 + stereo pack + real I2S TX DMA scheduling.
  *
- * This is deliberately separate from V3's isolated raw-DSP timing. V4A keeps
- * a real 44.1 kHz I2S transport running and records both synthesis/mix cost and
- * the time spent handing each 32-frame block to the TX DMA path.
+ * The transport quantum is 128 frames to match Felucca/FM-1's real ALNK0
+ * half-buffer. Each service quantum contains four CTL=32 FM blocks.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -17,9 +16,9 @@
 #include "freertos/task.h"
 
 #define V4A_CPU_HZ ((uint32_t)CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ * 1000000u)
-#define V4A_DMA_DESC 4u
+#define V4A_DMA_DESC 2u
 #define V4A_WRITE_TIMEOUT_MS 1000u
-#define V4A_STAT_N V4A_MEASURE_BLOCKS
+#define V4A_STAT_N V4A_MEASURE_QUANTA
 #define V4A_ARM_DELAY_MS 5000u
 
 #include "v4a_audio_workload.inc"
@@ -86,7 +85,7 @@ static i2s_chan_handle_t v4a_i2s_start(uint32_t *produced)
     i2s_chan_handle_t tx = NULL;
     i2s_chan_config_t chan = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     chan.dma_desc_num = V4A_DMA_DESC;
-    chan.dma_frame_num = CTL;
+    chan.dma_frame_num = V4A_QUANTUM_FRAMES;
     chan.auto_clear_after_cb = true;
     ESP_ERROR_CHECK(i2s_new_channel(&chan, &tx, NULL));
 
@@ -117,14 +116,14 @@ static i2s_chan_handle_t v4a_i2s_start(uint32_t *produced)
     };
     ESP_ERROR_CHECK(i2s_channel_register_event_callback(tx, &cbs, NULL));
 
-    memset(v4a_stereo, 0, sizeof v4a_stereo);
-    const size_t block_bytes = sizeof v4a_stereo;
+    memset(v4a_stereo_quantum, 0, sizeof v4a_stereo_quantum);
+    const size_t quantum_bytes = sizeof v4a_stereo_quantum;
     *produced = 0;
     for (;;) {
         size_t loaded = 0;
-        ESP_ERROR_CHECK(i2s_channel_preload_data(tx, v4a_stereo, block_bytes, &loaded));
-        *produced += (uint32_t)(loaded / block_bytes);
-        if (loaded < block_bytes)
+        ESP_ERROR_CHECK(i2s_channel_preload_data(tx, v4a_stereo_quantum, quantum_bytes, &loaded));
+        *produced += (uint32_t)(loaded / quantum_bytes);
+        if (loaded < quantum_bytes)
             break;
     }
     ESP_ERROR_CHECK(i2s_channel_enable(tx));
@@ -140,9 +139,9 @@ static void v4a_i2s_stop(i2s_chan_handle_t tx)
 static int v4a_submit(i2s_chan_handle_t tx, uint32_t *produced)
 {
     size_t written = 0;
-    esp_err_t e = i2s_channel_write(tx, v4a_stereo, sizeof v4a_stereo,
+    esp_err_t e = i2s_channel_write(tx, v4a_stereo_quantum, sizeof v4a_stereo_quantum,
                                     &written, V4A_WRITE_TIMEOUT_MS);
-    if (e != ESP_OK || written != sizeof v4a_stereo)
+    if (e != ESP_OK || written != sizeof v4a_stereo_quantum)
         return 0;
     ++*produced;
     return 1;
@@ -150,7 +149,7 @@ static int v4a_submit(i2s_chan_handle_t tx, uint32_t *produced)
 
 static void v4a_run_case(uint32_t voices)
 {
-    const uint32_t deadline = (uint32_t)(((uint64_t)V4A_CPU_HZ * CTL +
+    const uint32_t deadline = (uint32_t)(((uint64_t)V4A_CPU_HZ * V4A_QUANTUM_FRAMES +
                                           V4A_SAMPLE_RATE - 1u) / V4A_SAMPLE_RATE);
     uint32_t produced = 0, write_fail = 0, starve_observed = 0;
     uint32_t dsp_miss = 0, total_miss = 0;
@@ -162,9 +161,9 @@ static void v4a_run_case(uint32_t voices)
     v4a_dma_qovf = 0;
     tx = v4a_i2s_start(&produced);
 
-    for (uint32_t i = 0; i < V4A_WARM_BLOCKS; ++i) {
-        uint32_t sounded = v4a_render_stereo(voices);
-        v4a_sink ^= sounded + (uint32_t)v4a_stereo[(i * 2u) % (CTL * 2u)];
+    for (uint32_t i = 0; i < V4A_WARM_QUANTA; ++i) {
+        uint32_t sounded = v4a_render_quantum(voices);
+        v4a_sink ^= sounded + (uint32_t)v4a_stereo_quantum[(i * 2u) % (V4A_QUANTUM_FRAMES * 2u)];
         if (!v4a_submit(tx, &produced))
             ++write_fail;
     }
@@ -175,13 +174,11 @@ static void v4a_run_case(uint32_t voices)
 
     for (uint32_t i = 0; i < V4A_STAT_N; ++i) {
         uint32_t a = esp_cpu_get_cycle_count();
-        uint32_t sounded = v4a_render_stereo(voices);
+        uint32_t sounded = v4a_render_quantum(voices);
         uint32_t b = esp_cpu_get_cycle_count();
 
-        /* If DMA has already consumed every block the producer has ever
-         * supplied, the transport ran dry before this replacement block was
-         * submitted. This is a direct producer-vs-consumer starvation marker,
-         * separate from the driver's send-event queue overflow counter. */
+        /* If DMA has consumed every quantum the producer has supplied, the
+         * transport ran dry before this replacement quantum was submitted. */
         if ((int32_t)(produced - v4a_dma_sent) <= 0)
             ++starve_observed;
 
@@ -201,7 +198,8 @@ static void v4a_run_case(uint32_t voices)
             ++dsp_miss;
         if (total > deadline)
             ++total_miss;
-        v4a_sink = (v4a_sink << 5) ^ sounded ^ (uint32_t)v4a_stereo[(i * 2u) % (CTL * 2u)];
+        v4a_sink = (v4a_sink << 5) ^ sounded ^
+                    (uint32_t)v4a_stereo_quantum[(i * 2u) % (V4A_QUANTUM_FRAMES * 2u)];
     }
 
     sent1 = v4a_dma_sent;
@@ -212,12 +210,13 @@ static void v4a_run_case(uint32_t voices)
     v4a_sort(v4a_write, V4A_STAT_N);
     v4a_sort(v4a_total, V4A_STAT_N);
 
-    printf("FM6-V4A voices=%u blocks=%u deadline_cycles=%u "
+    printf("FM6-V4A voices=%u quanta=%u samples=%u deadline_cycles=%u "
            "dsp_avg=%u dsp_p95=%u dsp_p99=%u dsp_max=%u dsp_miss=%u "
            "write_avg=%u write_p99=%u write_max=%u "
            "total_avg=%u total_p99=%u total_max=%u total_miss=%u "
            "starve=%u write_fail=%u dma_sent=%u send_q_ovf=%u sink=%08x\n",
-           (unsigned)voices, (unsigned)V4A_STAT_N, (unsigned)deadline,
+           (unsigned)voices, (unsigned)V4A_STAT_N,
+           (unsigned)(V4A_STAT_N * V4A_QUANTUM_FRAMES), (unsigned)deadline,
            (unsigned)v4a_avg(v4a_dsp), (unsigned)v4a_pct(v4a_dsp, 95u),
            (unsigned)v4a_pct(v4a_dsp, 99u), (unsigned)v4a_dsp[V4A_STAT_N - 1u],
            (unsigned)dsp_miss,
@@ -237,10 +236,11 @@ void app_main(void)
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(V4A_ARM_DELAY_MS));
 
-    printf("FM6-V4A platform=ESP32-S3-I2S cpu_hz=%u sr=%u block=%u dma_desc=%u dma_frame=%u "
-           "bclk_gpio=%d ws_gpio=%d dout_gpio=%d\n",
+    printf("FM6-V4A platform=ESP32-S3-I2S cpu_hz=%u sr=%u ctl=%u quantum_frames=%u "
+           "dma_desc=%u dma_frame=%u bclk_gpio=%d ws_gpio=%d dout_gpio=%d\n",
            (unsigned)V4A_CPU_HZ, (unsigned)V4A_SAMPLE_RATE, (unsigned)CTL,
-           (unsigned)V4A_DMA_DESC, (unsigned)CTL,
+           (unsigned)V4A_QUANTUM_FRAMES, (unsigned)V4A_DMA_DESC,
+           (unsigned)V4A_QUANTUM_FRAMES,
            CONFIG_FM6_V4A_I2S_BCLK_GPIO, CONFIG_FM6_V4A_I2S_WS_GPIO,
            CONFIG_FM6_V4A_I2S_DOUT_GPIO);
     fflush(stdout);
