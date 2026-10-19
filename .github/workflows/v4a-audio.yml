@@ -23,20 +23,20 @@ jobs:
           set -euxo pipefail
           mkdir -p build/v4a-parser
           cat > build/v4a-parser/good.log <<'EOF'
-          FM6-V4A platform=fixture cpu_hz=240000000 sr=44100 block=32 dma_desc=4 dma_frame=32
-          FM6-V4A voices=1 blocks=1024 deadline_cycles=174150 dsp_avg=10000 dsp_p95=11000 dsp_p99=12000 dsp_max=13000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=10100 total_p99=12200 total_max=13300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=1
-          FM6-V4A voices=8 blocks=1024 deadline_cycles=174150 dsp_avg=30000 dsp_p95=32000 dsp_p99=34000 dsp_max=35000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=30100 total_p99=34200 total_max=35300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=2
-          FM6-V4A voices=12 blocks=1024 deadline_cycles=174150 dsp_avg=50000 dsp_p95=52000 dsp_p99=54000 dsp_max=55000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=50100 total_p99=54200 total_max=55300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=3
-          FM6-V4A voices=16 blocks=1024 deadline_cycles=174150 dsp_avg=70000 dsp_p95=72000 dsp_p99=74000 dsp_max=75000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=70100 total_p99=74200 total_max=75300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=4
-          FM6-V4A voices=20 blocks=1024 deadline_cycles=174150 dsp_avg=90000 dsp_p95=92000 dsp_p99=94000 dsp_max=95000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=90100 total_p99=94200 total_max=95300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=5
-          FM6-V4A voices=24 blocks=1024 deadline_cycles=174150 dsp_avg=130000 dsp_p95=135000 dsp_p99=140000 dsp_max=145000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=130100 total_p99=140200 total_max=145300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=6
+          FM6-V4A platform=fixture clock_hz=240000000 cpu_hz=240000000 dsp_nominal_sr=44100 quantum_frames=128
+          FM6-V4A voices=1 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=40000 dsp_p95=44000 dsp_p99=48000 dsp_max=52000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=40400 total_p99=48800 total_max=53200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=1
+          FM6-V4A voices=8 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=120000 dsp_p95=128000 dsp_p99=136000 dsp_max=140000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=120400 total_p99=136800 total_max=141200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=2
+          FM6-V4A voices=12 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=200000 dsp_p95=208000 dsp_p99=216000 dsp_max=220000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=200400 total_p99=216800 total_max=221200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=3
+          FM6-V4A voices=16 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=280000 dsp_p95=288000 dsp_p99=296000 dsp_max=300000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=280400 total_p99=296800 total_max=301200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=4
+          FM6-V4A voices=20 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=360000 dsp_p95=368000 dsp_p99=376000 dsp_max=380000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=360400 total_p99=376800 total_max=381200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=5
+          FM6-V4A voices=24 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=520000 dsp_p95=540000 dsp_p99=560000 dsp_max=580000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=520400 total_p99=560800 total_max=581200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=6
           FM6-V4A DONE
           EOF
           python3 scripts/parse_v4a_audio.py --label fixture build/v4a-parser/good.log \
             | tee build/v4a-parser/summary.txt
           grep -q '^FM6-V4A-SAFE-MAX voices=24 ' build/v4a-parser/summary.txt
 
-          sed 's/voices=24 blocks=1024/voices=24 blocks=1024/; s/starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=6/starve=1 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=6/' \
+          sed 's/starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=6/starve=1 write_fail=0 dma_sent=256 send_q_ovf=0 sink=6/' \
             build/v4a-parser/good.log > build/v4a-parser/starve.log
           python3 scripts/parse_v4a_audio.py --label fixture-starve build/v4a-parser/starve.log \
             | tee build/v4a-parser/starve-summary.txt
@@ -45,6 +45,52 @@ jobs:
         with:
           name: v4a-parser-smoke
           path: build/v4a-parser/
+
+  ac7911b8-alnk0-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Felucca
+        uses: actions/checkout@v4
+        with:
+          repository: hugelton/Felucca
+          ref: ${{ env.FELUCCA_SHA }}
+          path: upstream/Felucca
+          submodules: recursive
+      - name: Generate FM6 tables
+        run: |
+          mkdir -p generated build/v4a-ac
+          python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
+      - name: Install JieLi pi32v2 toolchain
+        run: bash upstream/Felucca/tools/get_toolchain.sh "$HOME/.jieli"
+      - name: Apply and compile V4A Felucca overlay
+        run: |
+          set -euxo pipefail
+          python3 scripts/apply_felucca_v4a_overlay.py upstream/Felucca
+          python3 scripts/apply_felucca_v4a_overlay.py upstream/Felucca
+
+          test "$(grep -c 'fm6_v4a_ac_core.inc' upstream/Felucca/firmware/src/felucca.c)" -eq 1
+          test "$(grep -c 'fm6_v4a_console.inc' upstream/Felucca/firmware/src/console.c)" -eq 1
+          test "$(grep -c 'con_word(&p, \"fm6audiobench\")' upstream/Felucca/firmware/src/console.c)" -eq 1
+          grep -q 'v4a_ac_half_begin();' upstream/Felucca/firmware/src/audio.c
+          grep -q 'v4a_ac_audio_block(o + 2u \* b);' upstream/Felucca/firmware/src/audio.c
+          grep -q 'v4a_ac_half_end(all, late);' upstream/Felucca/firmware/src/audio.c
+
+          TC="$HOME/.jieli/toolchain"
+          COMMON='-target pi32v2 -std=c11 -O2 -ffunction-sections -fdata-sections -fno-builtin -Wno-unused-function -Igenerated -Iupstream/Felucca/firmware/src -Iupstream/Felucca/firmware/src/fm6_bench -Ibench'
+          "$TC/pi32v2/bin/clang" $COMMON -c bench/felucca_overlay/overlay_v4a_core_smoke.c \
+            -o build/v4a-ac/v4a_core_smoke.o
+          "$TC/pi32v2/bin/clang" $COMMON -c bench/felucca_overlay/overlay_v4a_console_smoke.c \
+            -o build/v4a-ac/v4a_console_smoke.o
+          "$TC/common/bin/objdump" -t build/v4a-ac/v4a_core_smoke.o > build/v4a-ac/v4a_core.symbols
+          grep -q 'fm6_v4a_core_smoke_entry' build/v4a-ac/v4a_core.symbols
+          cp upstream/Felucca/firmware/src/audio.c build/v4a-ac/audio.patched.c
+          cp upstream/Felucca/firmware/src/console.c build/v4a-ac/console.patched.c
+          cp upstream/Felucca/firmware/src/felucca.c build/v4a-ac/felucca.patched.c
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4a-ac7911b8-alnk0-build
+          path: build/v4a-ac/
 
   esp32s3-i2s-build:
     runs-on: ubuntu-24.04
