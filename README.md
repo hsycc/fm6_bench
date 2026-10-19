@@ -6,6 +6,7 @@ The benchmark pins an upstream Felucca revision and validates identical fixed-po
 
 - `RESULTS_V2.md` — operator-kernel experiments and target static-disassembly comparison.
 - `RESULTS_V3.md` — common target runtime timing harness, ESP32-S3 QEMU/flash image flow, and FM-1/Felucca `fm6bench` console overlay for physical AC7911B8 measurements.
-- `HARDWARE_RUN.md` — repeatable physical ESP32-S3 and FM-1 capture flow using `scripts/run_v3_hardware.py`.
+- `HARDWARE_RUN.md` — repeatable physical ESP32-S3 and FM-1 V3 capture flow using `scripts/run_v3_hardware.py`.
+- `RESULTS_V4A.md` — transport-aware FM6 baseline using the same 128-frame audio service quantum on ESP32-S3 I2S DMA and FM-1 ALNK0 DMA, with `scripts/run_v4a_hardware.py` for physical capture.
 
-V3 deliberately keeps hosted and QEMU numbers separate from physical MCU results. Stable product polyphony is not claimed until real-board timing and full audio-path tests exist.
+Hosted and QEMU numbers are never treated as physical MCU performance. V3 establishes isolated FM6 cost; V4A adds real audio transport. Final advertised instrument polyphony still requires physical-board logs and the later V4B product-stack stress test.
