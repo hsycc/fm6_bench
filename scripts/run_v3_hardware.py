@@ -37,6 +37,34 @@ def run_checked(cmd: list[str], dry_run: bool = False) -> None:
         subprocess.run(cmd, check=True)
 
 
+def detect_esptool_write_command(dry_run: bool) -> str:
+    """Select the esptool CLI spelling without pinning a host esptool version.
+
+    Newer esptool releases expose `write-flash`; older ESP-IDF environments
+    commonly expose `write_flash`. Physical runs probe `--help` first. Dry-run
+    uses the current spelling and deliberately needs no esptool installation.
+    """
+    if dry_run:
+        return "write-flash"
+    proc = subprocess.run(
+        [sys.executable, "-m", "esptool", "--help"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(
+            "esptool is required for flashing: python3 -m pip install esptool\n"
+            + proc.stdout
+        )
+    help_text = proc.stdout
+    if "write-flash" in help_text:
+        return "write-flash"
+    if "write_flash" in help_text:
+        return "write_flash"
+    raise SystemExit("could not find write-flash/write_flash in esptool --help")
+
+
 def wait_open(port: str, baud: int, open_timeout: float):
     serial = require_serial()
     deadline = time.monotonic() + open_timeout
@@ -131,7 +159,7 @@ def main() -> int:
     add_common_capture_args(s3, "build/real-s3.log")
     s3.add_argument("--image", type=Path, default=Path("flash_image.bin"), help="merged image written at offset 0")
     s3.add_argument("--flash-baud", type=int, default=921600, help="esptool flashing baud")
-    s3.add_argument("--no-flash", action="store_true", help="skip flashing and only capture serial output")
+    s3.add_argument("--no-flash", action="store_true", help="skip flashing and only capture serial output; reset the board manually after capture starts")
 
     fm1 = sub.add_parser("fm1", help="trigger/capture the Felucca fm6bench console command")
     add_common_capture_args(fm1, "build/real-ac7911b8.log")
@@ -145,6 +173,7 @@ def main() -> int:
         if not args.port and not args.dry_run:
             raise SystemExit("--port is required for a physical run")
         if not args.no_flash:
+            write_cmd = detect_esptool_write_command(args.dry_run)
             run_checked([
                 sys.executable,
                 "-m",
@@ -155,7 +184,7 @@ def main() -> int:
                 args.port or "PORT",
                 "--baud",
                 str(args.flash_baud),
-                "write_flash",
+                write_cmd,
                 "0x0",
                 str(args.image),
             ], dry_run=args.dry_run)
