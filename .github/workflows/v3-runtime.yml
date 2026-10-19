@@ -101,17 +101,23 @@ jobs:
           set -o pipefail
           docker run --rm -v "$PWD:/work" -w /work espressif/idf:release-v5.5 bash -lc '
             set -euxo pipefail
-            python "$IDF_PATH/tools/idf_tools.py" install qemu-xtensa
             . "$IDF_PATH/export.sh"
             cd targets/esp32s3
             idf.py set-target esp32s3
             idf.py build
             cd build
             esptool.py --chip esp32s3 merge_bin --fill-flash-size 4MB -o flash_image.bin @flash_args
+            cp flash_image.bin /work/build/v3-s3/
+            cp flash_args /work/build/v3-s3/
+            cp fm6_v3_target_bench.bin /work/build/v3-s3/
+            cp fm6_v3_target_bench.elf /work/build/v3-s3/
+            cp fm6_v3_target_bench.map /work/build/v3-s3/
+            cp bootloader/bootloader.bin /work/build/v3-s3/
+            cp partition_table/partition-table.bin /work/build/v3-s3/
+            cp ../sdkconfig /work/build/v3-s3/
             set +e
-            timeout 45s qemu-system-xtensa -nographic -machine esp32s3 \
+            timeout 12s qemu-system-xtensa -nographic -machine esp32s3 \
               -drive file=flash_image.bin,if=mtd,format=raw \
-              -global driver=timer.esp32c3.timg,property=wdt_disable,value=true \
               > /work/build/v3-s3/qemu.txt 2>&1
             rc=$?
             set -e
@@ -121,8 +127,6 @@ jobs:
             fi
             grep -q "^FM6-V3 DONE" /work/build/v3-s3/qemu.txt
             test "$(grep -c "^FM6-V3 voices=" /work/build/v3-s3/qemu.txt)" -eq 6
-            cp fm6_v3_target_bench.elf /work/build/v3-s3/
-            cp fm6_v3_target_bench.map /work/build/v3-s3/
           '
           python3 scripts/parse_v3_runtime.py --label qemu-functional build/v3-s3/qemu.txt \
             | tee build/v3-s3/summary.txt
