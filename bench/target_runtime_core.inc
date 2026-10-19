@@ -12,11 +12,14 @@
  * A measurement is one FM6 control block (CTL = 32 samples) for N complete
  * six-operator voices. Clock read overhead is calibrated and subtracted.
  * Percentiles are over BENCH_RT_SAMPLES independent block timings.
+ * Only bench_render_voices() is inside the measured interval; result/sink
+ * bookkeeping happens after the end clock read.
  */
 #ifndef BENCH_TARGET_RUNTIME_CORE_INC
 #define BENCH_TARGET_RUNTIME_CORE_INC
 
 #include <stdint.h>
+#include "target_runtime_result.h"
 
 #ifndef BENCH_RT_PLATFORM
 #error "BENCH_RT_PLATFORM must be defined"
@@ -52,32 +55,19 @@
 
 #include "fm6_workload.inc"
 
-typedef struct {
-    uint32_t voices;
-    uint32_t clock_hz;
-    uint32_t cpu_hz;
-    uint32_t sample_rate;
-    uint32_t block_samples;
-    uint32_t read_overhead;
-    uint32_t deadline_ticks;
-    uint32_t min_ticks;
-    uint32_t p50_ticks;
-    uint32_t p95_ticks;
-    uint32_t p99_ticks;
-    uint32_t max_ticks;
-    uint32_t avg_ticks;
-    uint32_t misses;
-    uint32_t util_permille;
-    uint32_t avg_equiv_cycles;
-    uint32_t deadline_equiv_cycles;
-    uint32_t sink;
-} bench_rt_result_t;
-
-#define BENCH_RT_CASES 6u
 static const uint8_t bench_rt_voice_cases[BENCH_RT_CASES] = {1u, 8u, 12u, 16u, 20u, 24u};
 bench_rt_result_t bench_rt_results[BENCH_RT_CASES];
 volatile uint32_t bench_rt_sink;
 static uint32_t bench_rt_samples[BENCH_RT_SAMPLES];
+
+static uint32_t bench_rt_mix_sink(uint32_t sink, uint32_t value, uint32_t seq)
+{
+    /* Outside the timed interval. Rotation + sequence makes cancellation over
+     * an even number of identical return values unlikely while keeping the
+     * render call observably consumed. */
+    sink = (sink << 5) | (sink >> 27);
+    return sink ^ value ^ (0x9e3779b9u + seq * 0x85ebca6bu);
+}
 
 static uint32_t bench_rt_read_overhead(void)
 {
@@ -130,16 +120,20 @@ static void bench_rt_measure(uint32_t voices, bench_rt_result_t *r)
                                          (uint64_t)BENCH_RT_SAMPLE_RATE);
 
     bench_init_voices(voices);
-    for (uint32_t i = 0; i < BENCH_RT_WARM_BLOCKS; ++i)
-        bench_rt_sink ^= bench_render_voices(voices);
+    for (uint32_t i = 0; i < BENCH_RT_WARM_BLOCKS; ++i) {
+        uint32_t sounded = bench_render_voices(voices);
+        bench_rt_sink = bench_rt_mix_sink(bench_rt_sink, sounded, i);
+    }
 
     for (uint32_t i = 0; i < BENCH_RT_SAMPLES; ++i) {
-        uint32_t a, b, d;
+        uint32_t a, b, d, sounded;
         BENCH_RT_ENTER();
         a = (uint32_t)BENCH_RT_CLOCK_NOW();
-        bench_rt_sink ^= bench_render_voices(voices);
+        sounded = bench_render_voices(voices);
         b = (uint32_t)BENCH_RT_CLOCK_NOW();
         BENCH_RT_EXIT();
+        bench_rt_sink = bench_rt_mix_sink(bench_rt_sink, sounded,
+                                           BENCH_RT_WARM_BLOCKS + i);
         d = b - a;
         d = d > overhead ? d - overhead : 0u;
         bench_rt_samples[i] = d;
@@ -180,6 +174,7 @@ static void bench_rt_measure(uint32_t voices, bench_rt_result_t *r)
 
 static void bench_rt_run_all(void)
 {
+    bench_rt_sink = 0x6d2b79f5u;
     for (uint32_t i = 0; i < BENCH_RT_CASES; ++i)
         bench_rt_measure(bench_rt_voice_cases[i], &bench_rt_results[i]);
 }
