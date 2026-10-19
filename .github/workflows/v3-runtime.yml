@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: fm6-v3-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   FELUCCA_SHA: 5738617968a22b5d4c0d3470cfcc95559052f446
 
@@ -37,6 +41,9 @@ jobs:
           for v in 1 8 12 16 20 24; do
             grep -q "^FM6-V3 voices=${v} " build/v3-host/results.txt
           done
+          python3 scripts/parse_v3_runtime.py --label host-functional build/v3-host/results.txt \
+            | tee build/v3-host/summary.txt
+          grep -q '^FM6-V3-SAFE-MAX voices=24 ' build/v3-host/summary.txt
       - uses: actions/upload-artifact@v4
         with:
           name: v3-host-results
@@ -117,6 +124,8 @@ jobs:
             cp fm6_v3_target_bench.elf /work/build/v3-s3/
             cp fm6_v3_target_bench.map /work/build/v3-s3/
           '
+          python3 scripts/parse_v3_runtime.py --label qemu-functional build/v3-s3/qemu.txt \
+            | tee build/v3-s3/summary.txt
           cat build/v3-s3/qemu.txt
       - uses: actions/upload-artifact@v4
         with:
