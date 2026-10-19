@@ -66,7 +66,7 @@ jobs:
           python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
       - name: Install JieLi pi32v2 toolchain
         run: bash upstream/Felucca/tools/get_toolchain.sh "$HOME/.jieli"
-      - name: Cross-compile V3 AC runtime harness
+      - name: Cross-compile V3 AC runtime and Felucca overlay
         run: |
           set -euxo pipefail
           TC="$HOME/.jieli/toolchain"
@@ -76,6 +76,19 @@ jobs:
           "$TC/common/bin/objdump" -t build/v3-ac/runtime.o > build/v3-ac/runtime.symbols
           grep -q 'fm6_bench_ac7911b8_run' build/v3-ac/runtime.symbols
           grep -q 'bench_rt_results' build/v3-ac/runtime.symbols
+
+          python3 scripts/apply_felucca_v3_overlay.py upstream/Felucca
+          python3 scripts/apply_felucca_v3_overlay.py upstream/Felucca
+          test "$(grep -c 'fm6_bench_ac_core.inc' upstream/Felucca/firmware/src/felucca.c)" -eq 1
+          test "$(grep -c 'con_word(&p, "fm6bench")' upstream/Felucca/firmware/src/console.c)" -eq 1
+
+          OVERLAY_COMMON="$COMMON -Iupstream/Felucca/firmware/src/fm6_bench"
+          "$TC/pi32v2/bin/clang" $OVERLAY_COMMON -c bench/felucca_overlay/overlay_core_smoke.c \
+            -o build/v3-ac/overlay_core_smoke.o
+          "$TC/pi32v2/bin/clang" $OVERLAY_COMMON -c bench/felucca_overlay/overlay_console_smoke.c \
+            -o build/v3-ac/overlay_console_smoke.o
+          cp upstream/Felucca/firmware/src/felucca.c build/v3-ac/felucca.patched.c
+          cp upstream/Felucca/firmware/src/console.c build/v3-ac/console.patched.c
       - uses: actions/upload-artifact@v4
         with:
           name: v3-ac7911b8-runtime-build
