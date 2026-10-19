@@ -51,6 +51,12 @@ def main() -> int:
     safe_max = 0
     for voices in EXPECTED:
         r = rows[voices]
+        # `deadline_cycles` was emitted by the first S3-only V4A draft. Keep
+        # accepting it so old captures remain readable, but all new targets use
+        # the platform-neutral `deadline_ticks` field: S3 ticks are CCOUNT
+        # cycles, AC ticks are 24 MHz TIMER4 wall-time ticks.
+        if "deadline_ticks" not in r and "deadline_cycles" in r:
+            r["deadline_ticks"] = r["deadline_cycles"]
         required = (
             "deadline_ticks", "dsp_p99", "dsp_miss", "starve", "write_fail",
             "send_q_ovf", "write_p99", "total_p99"
