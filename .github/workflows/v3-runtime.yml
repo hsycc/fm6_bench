@@ -28,7 +28,7 @@ jobs:
       - name: Build and run V3 host harness
         run: |
           set -euxo pipefail
-          gcc -std=c11 -O2 -Wall -Wextra -Werror \
+          gcc -std=c11 -O2 -Wall -Wextra -Werror -Wno-unused-function \
             -Igenerated -Iupstream/Felucca/firmware/src -Ibench \
             bench/target_runtime_host.c -o build/v3-host/fm6_v3_host
           build/v3-host/fm6_v3_host | tee build/v3-host/results.txt
