@@ -43,8 +43,17 @@ def main() -> int:
         raise SystemExit(f"not a Felucca checkout: {felucca}")
 
     # V4A reuses V3's exact benchmark FM6 state and console formatting helpers.
-    subprocess.run([sys.executable, str(repo / "scripts" / "apply_felucca_v3_overlay.py"),
-                    str(felucca)], check=True)
+    # Do not blindly rerun the V3 patcher on an already-V4A tree: V4A extends
+    # the V3 help/dispatch text, so V3's original textual anchors no longer
+    # exist. Detect the stable semantic V3 markers instead.
+    felucca_before = (src / "felucca.c").read_text()
+    console_before = (src / "console.c").read_text()
+    have_v3 = ('#include "fm6_bench_ac_core.inc"' in felucca_before and
+               'con_word(&p, "fm6bench")' in console_before and
+               (src / "fm6_bench_console.inc").exists())
+    if not have_v3:
+        subprocess.run([sys.executable, str(repo / "scripts" / "apply_felucca_v3_overlay.py"),
+                        str(felucca)], check=True)
 
     bench_dst = src / "fm6_bench"
     shutil.copy2(repo / "bench" / "v4a_audio_workload.inc",
@@ -165,11 +174,9 @@ def main() -> int:
 
     old_dispatch = ('    else if (con_word(&p, "fm6bench"))\n'
                     '        con_fm6bench();\n')
-    new_dispatch = (old_dispatch +
-                    '    else if (con_word(&p, "fm6audiobench"))\n'
-                    '        con_fm6audiobench();\n')
-    text = insert_once(text, old_dispatch, new_dispatch[len(old_dispatch):],
-                       "console.c dispatch")
+    v4_dispatch = ('    else if (con_word(&p, "fm6audiobench"))\n'
+                   '        con_fm6audiobench();\n')
+    text = insert_once(text, old_dispatch, v4_dispatch, "console.c dispatch")
     console_c.write_text(text)
 
     print(f"FM6 V4A Felucca overlay applied to {felucca}")
