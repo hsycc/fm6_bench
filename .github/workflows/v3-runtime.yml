@@ -2,7 +2,7 @@ name: fm6-v3-runtime
 
 on:
   push:
-    branches: [main, agent/fm6-bench-v3-target-cycles]
+    branches: [main, agent/fm6-bench-v3-target-cycles, agent/fm6-bench-v4-hw-runner]
   pull_request:
   workflow_dispatch:
 
@@ -44,6 +44,18 @@ jobs:
           python3 scripts/parse_v3_runtime.py --label host-functional build/v3-host/results.txt \
             | tee build/v3-host/summary.txt
           grep -q '^FM6-V3-SAFE-MAX voices=24 ' build/v3-host/summary.txt
+      - name: Smoke test physical hardware runner
+        run: |
+          set -euxo pipefail
+          python3 scripts/run_v3_hardware.py --help > build/v3-host/hw-runner-help.txt
+          python3 scripts/run_v3_hardware.py s3 --dry-run --port TEST --image flash_image.bin \
+            | tee build/v3-host/hw-runner-s3-dry.txt
+          python3 scripts/run_v3_hardware.py fm1 --dry-run --port TEST \
+            | tee build/v3-host/hw-runner-fm1-dry.txt
+          grep -q 'write_flash 0x0 flash_image.bin' build/v3-host/hw-runner-s3-dry.txt
+          grep -q 'parse as real-s3' build/v3-host/hw-runner-s3-dry.txt
+          grep -q "trigger=b'fm6bench" build/v3-host/hw-runner-fm1-dry.txt
+          grep -q 'parse as real-ac7911b8' build/v3-host/hw-runner-fm1-dry.txt
       - uses: actions/upload-artifact@v4
         with:
           name: v3-host-results
