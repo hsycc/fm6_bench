@@ -22,8 +22,19 @@ static portMUX_TYPE bench_rt_mux = portMUX_INITIALIZER_UNLOCKED;
 #define BENCH_RT_EXIT() portEXIT_CRITICAL(&bench_rt_mux)
 #include "target_runtime_core.inc"
 
+#define BENCH_RT_ARM_DELAY_MS 5000u
+
 void app_main(void)
 {
+    /* After esptool resets a physical S3, USB/UART may need to re-enumerate.
+     * Keep this delay outside every measured region so the one-command host
+     * runner has time to reopen the serial device without missing FM6-V3 rows.
+     * It also avoids depending on one specific DTR/RTS auto-reset circuit.
+     */
+    printf("FM6-V3 ARM delay_ms=%u\n", (unsigned)BENCH_RT_ARM_DELAY_MS);
+    fflush(stdout);
+    vTaskDelay(pdMS_TO_TICKS(BENCH_RT_ARM_DELAY_MS));
+
     bench_rt_run_all();
     printf("FM6-V3 platform=%s clock_hz=%u cpu_hz=%u sr=%u block=%u samples=%u\n",
            BENCH_RT_PLATFORM, (unsigned)BENCH_RT_CLOCK_HZ, (unsigned)BENCH_RT_CPU_HZ,
