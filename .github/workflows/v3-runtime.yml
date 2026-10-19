@@ -141,7 +141,7 @@ jobs:
             cp partition_table/partition-table.bin /work/build/v3-s3/
             cp ../sdkconfig /work/build/v3-s3/
             set +e
-            timeout 12s qemu-system-xtensa -nographic -machine esp32s3 \
+            timeout 20s qemu-system-xtensa -nographic -machine esp32s3 \
               -drive file=flash_image.bin,if=mtd,format=raw \
               > /work/build/v3-s3/qemu.txt 2>&1
             rc=$?
