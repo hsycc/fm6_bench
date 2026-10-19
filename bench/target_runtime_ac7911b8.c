@@ -5,9 +5,9 @@
  * assume a CPU clock. Define BENCH_AC_CPU_HZ when the running firmware's
  * CPU clock is known and fixed to also populate equivalent-cycle fields.
  *
- * Intended use: compile into a RAM-run/diagnostic image, call
- * fm6_bench_ac7911b8_run() with normal audio stopped, then inspect/export
- * bench_rt_results[]. No UART/console dependency is required here.
+ * Each measured 32-sample render block disables interrupts only across the
+ * two clock reads + render, matching the S3 raw-DSP measurement boundary.
+ * Call with normal audio stopped; interrupts run normally between blocks.
  */
 #include <stdint.h>
 
@@ -29,10 +29,22 @@ static void bench_ac_time_init(void)
     BENCH_AC_T4_CON = (2u << 2) | 1u | (1u << 14);
 }
 
+static inline void bench_ac_irq_off(void)
+{
+    __asm__ volatile("cli" ::: "memory");
+}
+
+static inline void bench_ac_irq_on(void)
+{
+    __asm__ volatile("csync\n\tsti" ::: "memory");
+}
+
 #define BENCH_RT_PLATFORM "AC7911B8-pi32v2-timer4"
 #define BENCH_RT_CLOCK_NOW() (BENCH_AC_T4_CNT)
 #define BENCH_RT_CLOCK_HZ 24000000u
 #define BENCH_RT_CPU_HZ BENCH_AC_CPU_HZ
+#define BENCH_RT_ENTER() bench_ac_irq_off()
+#define BENCH_RT_EXIT() bench_ac_irq_on()
 #include "target_runtime_core.inc"
 
 void fm6_bench_ac7911b8_run(void)
