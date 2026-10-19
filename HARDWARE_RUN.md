@@ -36,14 +36,18 @@ Typical Windows run:
 python scripts/run_v3_hardware.py s3 --port COM6 --image flash_image.bin
 ```
 
+The helper probes `python -m esptool --help` and automatically uses the current `write-flash` spelling or the older `write_flash` spelling, so the host is not pinned to one esptool generation.
+
+The S3 benchmark image has a 5-second arming window after boot. That delay is outside all measured FM6 regions; it exists only to give native USB or a USB/UART bridge time to re-enumerate after flashing before the result rows are emitted.
+
 The helper performs:
 
 ```text
-esptool write_flash 0x0 flash_image.bin
+esptool write-flash/write_flash 0x0 flash_image.bin
         ↓
-wait for USB serial reconnect
+wait for USB serial reconnect during the 5 s arming window
         ↓
-capture boot / FM6-V3 rows
+capture FM6-V3 rows
         ↓
 require FM6-V3 DONE + all six voice rows
         ↓
@@ -57,6 +61,8 @@ If the correct image is already installed:
 ```bash
 python3 scripts/run_v3_hardware.py s3 --port /dev/cu.usbmodem101 --no-flash
 ```
+
+`--no-flash` does not force a board reset because ESP32-S3 boards can expose different reset transports. Start the command and reset the board manually so the runner sees a fresh 5-second arming window and the complete benchmark.
 
 Use a slower flash baud if a USB bridge is unreliable:
 
