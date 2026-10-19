@@ -1,0 +1,87 @@
+name: fm6-v4a-audio
+
+on:
+  push:
+    branches: [main, agent/fm6-bench-v4-full-audio]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: fm6-v4a-audio-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FELUCCA_SHA: 5738617968a22b5d4c0d3470cfcc95559052f446
+
+jobs:
+  parser-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise V4A parser safety gate
+        run: |
+          set -euxo pipefail
+          mkdir -p build/v4a-parser
+          cat > build/v4a-parser/good.log <<'EOF'
+          FM6-V4A platform=fixture cpu_hz=240000000 sr=44100 block=32 dma_desc=4 dma_frame=32
+          FM6-V4A voices=1 blocks=1024 deadline_cycles=174150 dsp_avg=10000 dsp_p95=11000 dsp_p99=12000 dsp_max=13000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=10100 total_p99=12200 total_max=13300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=1
+          FM6-V4A voices=8 blocks=1024 deadline_cycles=174150 dsp_avg=30000 dsp_p95=32000 dsp_p99=34000 dsp_max=35000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=30100 total_p99=34200 total_max=35300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=2
+          FM6-V4A voices=12 blocks=1024 deadline_cycles=174150 dsp_avg=50000 dsp_p95=52000 dsp_p99=54000 dsp_max=55000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=50100 total_p99=54200 total_max=55300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=3
+          FM6-V4A voices=16 blocks=1024 deadline_cycles=174150 dsp_avg=70000 dsp_p95=72000 dsp_p99=74000 dsp_max=75000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=70100 total_p99=74200 total_max=75300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=4
+          FM6-V4A voices=20 blocks=1024 deadline_cycles=174150 dsp_avg=90000 dsp_p95=92000 dsp_p99=94000 dsp_max=95000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=90100 total_p99=94200 total_max=95300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=5
+          FM6-V4A voices=24 blocks=1024 deadline_cycles=174150 dsp_avg=130000 dsp_p95=135000 dsp_p99=140000 dsp_max=145000 dsp_miss=0 write_avg=100 write_p99=200 write_max=300 total_avg=130100 total_p99=140200 total_max=145300 total_miss=0 starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=6
+          FM6-V4A DONE
+          EOF
+          python3 scripts/parse_v4a_audio.py --label fixture build/v4a-parser/good.log \
+            | tee build/v4a-parser/summary.txt
+          grep -q '^FM6-V4A-SAFE-MAX voices=24 ' build/v4a-parser/summary.txt
+
+          sed 's/voices=24 blocks=1024/voices=24 blocks=1024/; s/starve=0 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=6/starve=1 write_fail=0 dma_sent=1024 send_q_ovf=0 sink=6/' \
+            build/v4a-parser/good.log > build/v4a-parser/starve.log
+          python3 scripts/parse_v4a_audio.py --label fixture-starve build/v4a-parser/starve.log \
+            | tee build/v4a-parser/starve-summary.txt
+          grep -q '^FM6-V4A-SAFE-MAX voices=20 ' build/v4a-parser/starve-summary.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4a-parser-smoke
+          path: build/v4a-parser/
+
+  esp32s3-i2s-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Felucca
+        uses: actions/checkout@v4
+        with:
+          repository: hugelton/Felucca
+          ref: ${{ env.FELUCCA_SHA }}
+          path: upstream/Felucca
+          submodules: recursive
+      - name: Generate FM6 tables
+        run: |
+          mkdir -p generated build/v4a-s3
+          python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
+      - name: Build physical ESP32-S3 I2S benchmark
+        run: |
+          set -o pipefail
+          docker run --rm -v "$PWD:/work" -w /work espressif/idf:release-v5.5 bash -lc '
+            set -euxo pipefail
+            . "$IDF_PATH/export.sh"
+            cd targets/esp32s3_v4a
+            idf.py set-target esp32s3
+            idf.py build
+            cd build
+            esptool.py --chip esp32s3 merge_bin --fill-flash-size 4MB -o flash_image.bin @flash_args
+            cp flash_image.bin /work/build/v4a-s3/
+            cp flash_args /work/build/v4a-s3/
+            cp fm6_v4a_audio_bench.bin /work/build/v4a-s3/
+            cp fm6_v4a_audio_bench.elf /work/build/v4a-s3/
+            cp fm6_v4a_audio_bench.map /work/build/v4a-s3/
+            cp bootloader/bootloader.bin /work/build/v4a-s3/
+            cp partition_table/partition-table.bin /work/build/v4a-s3/
+            cp ../sdkconfig /work/build/v4a-s3/
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4a-esp32s3-i2s-image
+          path: build/v4a-s3/
