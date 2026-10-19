@@ -85,7 +85,10 @@ static void v4a_ac_half_begin(void)
     v4a_ac_copy_accum = 0;
 }
 
-/* Called once per CTL=32 block from the real ALNK0 ISR. */
+/* Called once per CTL=32 block from the real ALNK0 ISR. `dsp` intentionally
+ * includes the final copy into the actual DMA half, matching S3's render+
+ * mix/pack+transport-buffer fill boundary. `write` keeps that copy as a
+ * diagnostic subset. */
 static void v4a_ac_audio_block(int32_t *out)
 {
     uint32_t a = fm1_ticks();
@@ -95,7 +98,7 @@ static void v4a_ac_audio_block(int32_t *out)
     for (i = 0; i < CTL * 2u; ++i)
         out[i] = v4a_stereo_block[i];
     uint32_t c = fm1_ticks();
-    v4a_ac_dsp_accum += b - a;
+    v4a_ac_dsp_accum += c - a;
     v4a_ac_copy_accum += c - b;
     v4a_ac_sink = (v4a_ac_sink << 5) ^ sounded ^ (uint32_t)out[0];
 }
