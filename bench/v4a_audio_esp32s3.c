@@ -210,7 +210,7 @@ static void v4a_run_case(uint32_t voices)
     v4a_sort(v4a_write, V4A_STAT_N);
     v4a_sort(v4a_total, V4A_STAT_N);
 
-    printf("FM6-V4A voices=%u quanta=%u samples=%u deadline_cycles=%u "
+    printf("FM6-V4A voices=%u quanta=%u samples=%u deadline_ticks=%u "
            "dsp_avg=%u dsp_p95=%u dsp_p99=%u dsp_max=%u dsp_miss=%u "
            "write_avg=%u write_p99=%u write_max=%u "
            "total_avg=%u total_p99=%u total_max=%u total_miss=%u "
@@ -236,10 +236,10 @@ void app_main(void)
     fflush(stdout);
     vTaskDelay(pdMS_TO_TICKS(V4A_ARM_DELAY_MS));
 
-    printf("FM6-V4A platform=ESP32-S3-I2S cpu_hz=%u sr=%u ctl=%u quantum_frames=%u "
-           "dma_desc=%u dma_frame=%u bclk_gpio=%d ws_gpio=%d dout_gpio=%d\n",
-           (unsigned)V4A_CPU_HZ, (unsigned)V4A_SAMPLE_RATE, (unsigned)CTL,
-           (unsigned)V4A_QUANTUM_FRAMES, (unsigned)V4A_DMA_DESC,
+    printf("FM6-V4A platform=ESP32-S3-I2S clock_hz=%u cpu_hz=%u dsp_nominal_sr=%u "
+           "ctl=%u quantum_frames=%u dma_desc=%u dma_frame=%u bclk_gpio=%d ws_gpio=%d dout_gpio=%d\n",
+           (unsigned)V4A_CPU_HZ, (unsigned)V4A_CPU_HZ, (unsigned)V4A_SAMPLE_RATE,
+           (unsigned)CTL, (unsigned)V4A_QUANTUM_FRAMES, (unsigned)V4A_DMA_DESC,
            (unsigned)V4A_QUANTUM_FRAMES,
            CONFIG_FM6_V4A_I2S_BCLK_GPIO, CONFIG_FM6_V4A_I2S_WS_GPIO,
            CONFIG_FM6_V4A_I2S_DOUT_GPIO);
