@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: fm6-v4a-audio-${{ github.ref }}
   cancel-in-progress: true
@@ -18,40 +21,27 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Exercise V4A parser safety gate
+      - name: Unit tests and strict CLI negative gates
         run: |
           set -euxo pipefail
           mkdir -p build/v4a-parser
-          cat > build/v4a-parser/good.log <<'EOF'
-          FM6-V4A platform=fixture clock_hz=240000000 cpu_hz=240000000 dsp_nominal_sr=44100 quantum_frames=128
-          FM6-V4A voices=1 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=40000 dsp_p95=44000 dsp_p99=48000 dsp_max=52000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=40400 total_p99=48800 total_max=53200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=1
-          FM6-V4A voices=8 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=120000 dsp_p95=128000 dsp_p99=136000 dsp_max=140000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=120400 total_p99=136800 total_max=141200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=2
-          FM6-V4A voices=12 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=200000 dsp_p95=208000 dsp_p99=216000 dsp_max=220000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=200400 total_p99=216800 total_max=221200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=3
-          FM6-V4A voices=16 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=280000 dsp_p95=288000 dsp_p99=296000 dsp_max=300000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=280400 total_p99=296800 total_max=301200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=4
-          FM6-V4A voices=20 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=360000 dsp_p95=368000 dsp_p99=376000 dsp_max=380000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=360400 total_p99=376800 total_max=381200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=5
-          FM6-V4A voices=24 quanta=256 samples=32768 deadline_ticks=696599 dsp_avg=520000 dsp_p95=540000 dsp_p99=560000 dsp_max=580000 dsp_miss=0 write_avg=400 write_p99=800 write_max=1200 total_avg=520400 total_p99=560800 total_max=581200 total_miss=0 starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=6
-          FM6-V4A DONE
-          EOF
-          python3 scripts/parse_v4a_audio.py --label fixture build/v4a-parser/good.log \
-            | tee build/v4a-parser/summary.txt
-          grep -q '^FM6-V4A-SAFE-MAX voices=24 ' build/v4a-parser/summary.txt
-
-          sed 's/starve=0 write_fail=0 dma_sent=256 send_q_ovf=0 sink=6/starve=1 write_fail=0 dma_sent=256 send_q_ovf=0 sink=6/' \
-            build/v4a-parser/good.log > build/v4a-parser/starve.log
-          python3 scripts/parse_v4a_audio.py --label fixture-starve build/v4a-parser/starve.log \
-            | tee build/v4a-parser/starve-summary.txt
+          python3 -m unittest discover -s tests -v 2>&1 | tee build/v4a-parser/tests.txt
+          PYTHONPATH=tests python3 - <<'PY'
+          from pathlib import Path
+          from test_v4a import fixture
+          out = Path('build/v4a-parser')
+          (out/'good.log').write_text(fixture('fixture'))
+          (out/'starve.log').write_text(fixture('fixture', lambda v,r: r.update(starve=1) if v==24 else None))
+          (out/'zero-deadline.log').write_text(fixture('fixture', lambda v,r: r.update(deadline_ticks=0)))
+          PY
+          python3 scripts/parse_v4a_audio.py --source fixture --require-voices 24 \
+            --json-out build/v4a-parser/good.json build/v4a-parser/good.log | tee build/v4a-parser/summary.txt
+          python3 scripts/parse_v4a_audio.py --source fixture build/v4a-parser/starve.log | tee build/v4a-parser/starve-summary.txt
           grep -q '^FM6-V4A-SAFE-MAX voices=20 ' build/v4a-parser/starve-summary.txt
-      - name: Smoke test V4A physical runner
-        run: |
-          set -euxo pipefail
-          python3 scripts/run_v4a_hardware.py --help > build/v4a-parser/runner-help.txt
-          python3 scripts/run_v4a_hardware.py s3 --dry-run --port TEST --image flash_image.bin \
-            | tee build/v4a-parser/runner-s3-dry.txt
-          python3 scripts/run_v4a_hardware.py fm1 --dry-run --port TEST \
-            | tee build/v4a-parser/runner-fm1-dry.txt
-          grep -q 'parse as real-s3-v4a' build/v4a-parser/runner-s3-dry.txt
-          grep -q "trigger=b'fm6audiobench" build/v4a-parser/runner-fm1-dry.txt
-          grep -q 'parse as real-ac7911b8-v4a' build/v4a-parser/runner-fm1-dry.txt
+          if python3 scripts/parse_v4a_audio.py --source fixture --require-voices 24 build/v4a-parser/starve.log; then exit 1; fi
+          if python3 scripts/parse_v4a_audio.py build/v4a-parser/zero-deadline.log; then exit 1; fi
+          python3 scripts/run_v4a_hardware.py s3 --dry-run --port TEST --image flash_image.bin
+          python3 scripts/run_v4a_hardware.py fm1 --dry-run --port TEST
       - uses: actions/upload-artifact@v4
         with:
           name: v4a-parser-smoke
@@ -74,31 +64,29 @@ jobs:
           python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
       - name: Install JieLi pi32v2 toolchain
         run: bash upstream/Felucca/tools/get_toolchain.sh "$HOME/.jieli"
-      - name: Apply and compile V4A Felucca overlay
+      - name: Apply and compile V4A overlay smoke tests
         run: |
           set -euxo pipefail
           python3 scripts/apply_felucca_v4a_overlay.py upstream/Felucca
           python3 scripts/apply_felucca_v4a_overlay.py upstream/Felucca
-
           test "$(grep -c 'fm6_v4a_ac_core.inc' upstream/Felucca/firmware/src/felucca.c)" -eq 1
-          test "$(grep -c 'fm6_v4a_console.inc' upstream/Felucca/firmware/src/console.c)" -eq 1
           test "$(grep -c 'con_word(&p, \"fm6audiobench\")' upstream/Felucca/firmware/src/console.c)" -eq 1
-          grep -q 'v4a_ac_half_begin();' upstream/Felucca/firmware/src/audio.c
-          grep -q 'v4a_ac_audio_block(o + 2u \* b);' upstream/Felucca/firmware/src/audio.c
-          grep -q 'v4a_ac_half_end(all, late);' upstream/Felucca/firmware/src/audio.c
-
           TC="$HOME/.jieli/toolchain"
           COMMON='-target pi32v2 -std=c11 -O2 -ffunction-sections -fdata-sections -fno-builtin -Wno-unused-function -Igenerated -Iupstream/Felucca/firmware/src -Iupstream/Felucca/firmware/src/fm6_bench -Ibench'
-          "$TC/pi32v2/bin/clang" $COMMON -c bench/felucca_overlay/overlay_v4a_core_smoke.c \
-            -o build/v4a-ac/v4a_core_smoke.o
-          "$TC/pi32v2/bin/clang" $COMMON -c bench/felucca_overlay/overlay_v4a_console_smoke.c \
-            -o build/v4a-ac/v4a_console_smoke.o
-          "$TC/common/bin/objdump" -t build/v4a-ac/v4a_core_smoke.o > build/v4a-ac/v4a_core.symbols
-          grep -q 'fm6_v4a_core_smoke_entry' build/v4a-ac/v4a_core.symbols
-          cp upstream/Felucca/firmware/src/audio.c build/v4a-ac/audio.patched.c
-          cp upstream/Felucca/firmware/src/console.c build/v4a-ac/console.patched.c
-          cp upstream/Felucca/firmware/src/felucca.c build/v4a-ac/felucca.patched.c
+          "$TC/pi32v2/bin/clang" $COMMON -c bench/felucca_overlay/overlay_v4a_core_smoke.c -o build/v4a-ac/v4a_core_smoke.o
+          "$TC/pi32v2/bin/clang" $COMMON -c bench/felucca_overlay/overlay_v4a_console_smoke.c -o build/v4a-ac/v4a_console_smoke.o
+      - name: Compile and link full patched Felucca application
+        run: |
+          set -euxo pipefail
+          python3 -m pip install Pillow fonttools
+          export JIELI_TOOLCHAIN="$HOME/.jieli/toolchain"
+          python3 scripts/build_v4a_felucca_app.py upstream/Felucca | tee build/v4a-ac/full-link.txt
+          cp upstream/Felucca/build/felucca.elf build/v4a-ac/
+          cp upstream/Felucca/build/felucca.symbols build/v4a-ac/
+          printf '%s\n' "$GITHUB_SHA" > build/v4a-ac/BUILD_COMMIT.txt
+          printf '%s\n' 'Full application ELF only. NOT an installable FM-1 .fwsc. Do not flash ELF/raw app with esptool.' > build/v4a-ac/NOT_INSTALLABLE.txt
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: v4a-ac7911b8-alnk0-build
           path: build/v4a-ac/
@@ -127,17 +115,19 @@ jobs:
             cd targets/esp32s3_v4a
             idf.py set-target esp32s3
             idf.py build
+            xtensa-esp32s3-elf-gcc --version > /work/build/v4a-s3/compiler.txt
             cd build
             esptool.py --chip esp32s3 merge_bin --fill-flash-size 4MB -o flash_image.bin @flash_args
-            cp flash_image.bin /work/build/v4a-s3/
-            cp flash_args /work/build/v4a-s3/
-            cp fm6_v4a_audio_bench.bin /work/build/v4a-s3/
-            cp fm6_v4a_audio_bench.elf /work/build/v4a-s3/
-            cp fm6_v4a_audio_bench.map /work/build/v4a-s3/
-            cp bootloader/bootloader.bin /work/build/v4a-s3/
-            cp partition_table/partition-table.bin /work/build/v4a-s3/
-            cp ../sdkconfig /work/build/v4a-s3/
+            cp flash_image.bin flash_args fm6_v4a_audio_bench.bin fm6_v4a_audio_bench.elf fm6_v4a_audio_bench.map /work/build/v4a-s3/
+            cp bootloader/bootloader.bin partition_table/partition-table.bin ../sdkconfig /work/build/v4a-s3/
           '
+          mkdir -p build/v4a-s3/tools
+          cp scripts/run_v4a_hardware.py scripts/run_v3_hardware.py scripts/parse_v4a_audio.py build/v4a-s3/tools/
+          cp V4A_VALIDATION.md build/v4a-s3/
+          printf '%s\n' "$GITHUB_SHA" > build/v4a-s3/BUILD_COMMIT.txt
+          printf '%s\n' "$FELUCCA_SHA" > build/v4a-s3/FELUCCA_COMMIT.txt
+          docker image inspect espressif/idf:release-v5.5 --format '{{json .RepoDigests}}' > build/v4a-s3/container-digest.json
+          (cd build/v4a-s3 && sha256sum *.bin *.elf *.map sdkconfig tools/*.py > SHA256SUMS)
       - uses: actions/upload-artifact@v4
         with:
           name: v4a-esp32s3-i2s-image
