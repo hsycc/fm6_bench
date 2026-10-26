@@ -1,0 +1,18 @@
+menu "FM6 V4A audio benchmark"
+
+config FM6_V4A_I2S_BCLK_GPIO
+    int "I2S BCLK GPIO"
+    default 4
+    help
+        Physical output pin used only to make the I2S transport run as it would
+        in a product. The benchmark does not require a codec to be connected.
+
+config FM6_V4A_I2S_WS_GPIO
+    int "I2S WS/LRCK GPIO"
+    default 5
+
+config FM6_V4A_I2S_DOUT_GPIO
+    int "I2S DOUT GPIO"
+    default 6
+
+endmenu

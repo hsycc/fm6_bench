@@ -1,11 +1,13 @@
 # fm6_bench
 
-Cross-platform benchmark for the Felucca/MSFA 6-operator FM core on AC7911B8 and ESP32-S3.
+Cross-platform benchmark for the pinned Felucca/MSFA 6-operator FM core on AC7911B8 and ESP32-S3.
 
-The benchmark pins an upstream Felucca revision and validates identical fixed-point rendering before comparing target builds.
+- **`V4A_VALIDATION.md`** — current validation limits, stricter result gates, full-application build coverage and safe physical-run instructions. Read this first.
+- `RESULTS_V2.md` — operator-kernel experiments and target static disassembly; instruction counts are not cycles.
+- `RESULTS_V3.md` — isolated runtime harness, S3 QEMU/flash image and FM-1 `fm6bench` overlay.
+- `HARDWARE_RUN.md` — V3 physical capture helper.
+- `RESULTS_V4A.md` — transport-baseline design; the validation addendum above supersedes its earlier starvation/capacity claims.
 
-- `RESULTS_V2.md` — operator-kernel experiments and target static-disassembly comparison.
-- `RESULTS_V3.md` — common target runtime timing harness, ESP32-S3 QEMU/flash image flow, and FM-1/Felucca `fm6bench` console overlay for physical AC7911B8 measurements.
-- `HARDWARE_RUN.md` — repeatable physical ESP32-S3 and FM-1 capture flow using `scripts/run_v3_hardware.py`.
+V4A CI now includes strict Python parser/capture regressions, real ESP-IDF compilation/linking, and the actual patched Felucca unity application's link/layout checks (not just overlay objects). Test fixtures and QEMU are never MCU throughput evidence. Physical logs, longer stress tests and audio-integrity checks are still required before claiming product polyphony.
 
-V3 deliberately keeps hosted and QEMU numbers separate from physical MCU results. Stable product polyphony is not claimed until real-board timing and full audio-path tests exist.
+Felucca's large benchmark voice/output buffers are placed in its existing `.pool` region, which is the same internal SRAM as `.bss`. Neither the linker memory limits nor its minimum-headroom checks are relaxed. The FM math, patch and voice sequence remain unchanged.

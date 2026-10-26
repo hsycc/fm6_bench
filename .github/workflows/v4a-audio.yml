@@ -1,0 +1,134 @@
+name: fm6-v4a-audio
+
+on:
+  push:
+    branches: [main, agent/fm6-bench-v4-full-audio]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fm6-v4a-audio-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FELUCCA_SHA: 5738617968a22b5d4c0d3470cfcc95559052f446
+
+jobs:
+  parser-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests and strict CLI negative gates
+        run: |
+          set -euxo pipefail
+          mkdir -p build/v4a-parser
+          python3 -m unittest discover -s tests -v 2>&1 | tee build/v4a-parser/tests.txt
+          PYTHONPATH=tests python3 - <<'PY'
+          from pathlib import Path
+          from test_v4a import fixture
+          out = Path('build/v4a-parser')
+          (out/'good.log').write_text(fixture('fixture'))
+          (out/'starve.log').write_text(fixture('fixture', lambda v,r: r.update(starve=1) if v==24 else None))
+          (out/'zero-deadline.log').write_text(fixture('fixture', lambda v,r: r.update(deadline_ticks=0)))
+          PY
+          python3 scripts/parse_v4a_audio.py --source fixture --require-voices 24 \
+            --json-out build/v4a-parser/good.json build/v4a-parser/good.log | tee build/v4a-parser/summary.txt
+          python3 scripts/parse_v4a_audio.py --source fixture build/v4a-parser/starve.log | tee build/v4a-parser/starve-summary.txt
+          grep -q '^FM6-V4A-SAFE-MAX voices=20 ' build/v4a-parser/starve-summary.txt
+          if python3 scripts/parse_v4a_audio.py --source fixture --require-voices 24 build/v4a-parser/starve.log; then exit 1; fi
+          if python3 scripts/parse_v4a_audio.py build/v4a-parser/zero-deadline.log; then exit 1; fi
+          python3 scripts/run_v4a_hardware.py s3 --dry-run --port TEST --image flash_image.bin
+          python3 scripts/run_v4a_hardware.py fm1 --dry-run --port TEST
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4a-parser-smoke
+          path: build/v4a-parser/
+
+  ac7911b8-alnk0-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Felucca
+        uses: actions/checkout@v4
+        with:
+          repository: hugelton/Felucca
+          ref: ${{ env.FELUCCA_SHA }}
+          path: upstream/Felucca
+          submodules: recursive
+      - name: Generate FM6 tables
+        run: |
+          mkdir -p generated build/v4a-ac
+          python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
+      - name: Install JieLi pi32v2 toolchain
+        run: bash upstream/Felucca/tools/get_toolchain.sh "$HOME/.jieli"
+      - name: Apply and compile V4A overlay smoke tests
+        run: |
+          set -euxo pipefail
+          python3 scripts/apply_felucca_v4a_overlay.py upstream/Felucca
+          python3 scripts/apply_felucca_v4a_overlay.py upstream/Felucca
+          test "$(grep -c 'fm6_v4a_ac_core.inc' upstream/Felucca/firmware/src/felucca.c)" -eq 1
+          test "$(grep -c 'con_word(&p, \"fm6audiobench\")' upstream/Felucca/firmware/src/console.c)" -eq 1
+          TC="$HOME/.jieli/toolchain"
+          COMMON='-target pi32v2 -std=c11 -O2 -ffunction-sections -fdata-sections -fno-builtin -Wno-unused-function -Igenerated -Iupstream/Felucca/firmware/src -Iupstream/Felucca/firmware/src/fm6_bench -Ibench'
+          "$TC/pi32v2/bin/clang" $COMMON -c bench/felucca_overlay/overlay_v4a_core_smoke.c -o build/v4a-ac/v4a_core_smoke.o
+          "$TC/pi32v2/bin/clang" $COMMON -c bench/felucca_overlay/overlay_v4a_console_smoke.c -o build/v4a-ac/v4a_console_smoke.o
+      - name: Compile and link full patched Felucca application
+        run: |
+          set -euxo pipefail
+          python3 -m pip install Pillow fonttools
+          export JIELI_TOOLCHAIN="$HOME/.jieli/toolchain"
+          python3 scripts/build_v4a_felucca_app.py upstream/Felucca | tee build/v4a-ac/full-link.txt
+          cp upstream/Felucca/build/felucca.elf build/v4a-ac/
+          cp upstream/Felucca/build/felucca.symbols build/v4a-ac/
+          printf '%s\n' "$GITHUB_SHA" > build/v4a-ac/BUILD_COMMIT.txt
+          printf '%s\n' 'Full application ELF only. NOT an installable FM-1 .fwsc. Do not flash ELF/raw app with esptool.' > build/v4a-ac/NOT_INSTALLABLE.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v4a-ac7911b8-alnk0-build
+          path: build/v4a-ac/
+
+  esp32s3-i2s-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned Felucca
+        uses: actions/checkout@v4
+        with:
+          repository: hugelton/Felucca
+          ref: ${{ env.FELUCCA_SHA }}
+          path: upstream/Felucca
+          submodules: recursive
+      - name: Generate FM6 tables
+        run: |
+          mkdir -p generated build/v4a-s3
+          python3 upstream/Felucca/tools/gen_tables.py generated/felucca_tables.h
+      - name: Build physical ESP32-S3 I2S benchmark
+        run: |
+          set -o pipefail
+          docker run --rm -v "$PWD:/work" -w /work espressif/idf:release-v5.5 bash -lc '
+            set -euxo pipefail
+            . "$IDF_PATH/export.sh"
+            cd targets/esp32s3_v4a
+            idf.py set-target esp32s3
+            idf.py build
+            xtensa-esp32s3-elf-gcc --version > /work/build/v4a-s3/compiler.txt
+            cd build
+            esptool.py --chip esp32s3 merge_bin --fill-flash-size 4MB -o flash_image.bin @flash_args
+            cp flash_image.bin flash_args fm6_v4a_audio_bench.bin fm6_v4a_audio_bench.elf fm6_v4a_audio_bench.map /work/build/v4a-s3/
+            cp bootloader/bootloader.bin partition_table/partition-table.bin ../sdkconfig /work/build/v4a-s3/
+          '
+          mkdir -p build/v4a-s3/tools
+          cp scripts/run_v4a_hardware.py scripts/run_v3_hardware.py scripts/parse_v4a_audio.py build/v4a-s3/tools/
+          cp V4A_VALIDATION.md build/v4a-s3/
+          printf '%s\n' "$GITHUB_SHA" > build/v4a-s3/BUILD_COMMIT.txt
+          printf '%s\n' "$FELUCCA_SHA" > build/v4a-s3/FELUCCA_COMMIT.txt
+          docker image inspect espressif/idf:release-v5.5 --format '{{json .RepoDigests}}' > build/v4a-s3/container-digest.json
+          (cd build/v4a-s3 && sha256sum *.bin *.elf *.map sdkconfig tools/*.py > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4a-esp32s3-i2s-image
+          path: build/v4a-s3/
